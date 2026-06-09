@@ -160,6 +160,9 @@ function SegmentMesh({
           <div style={{ fontWeight: 600, color: segment.status === 'normal' ? '#94a3b8' : segment.status === 'low' ? '#fb923c' : '#f87171' }}>
             {segment.spec}
           </div>
+          <div style={{ marginTop: '2px', fontSize: '10px', color: '#60a5fa' }}>
+            龄期: <span style={{ fontWeight: 600 }}>{segment.ageDays}</span> 天
+          </div>
           <div style={{ marginTop: '2px' }}>
             库存: <span style={{ fontWeight: 700, color: segment.status === 'critical' ? '#ef4444' : '#fbbf24' }}>{segment.quantity}</span>
             <span style={{ color: '#64748b' }}> / 安全{segment.safeStock}</span>

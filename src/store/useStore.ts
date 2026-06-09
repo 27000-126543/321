@@ -125,48 +125,63 @@ const useStore = create<AppState>((set, get) => ({
   },
 
   updateMonitoring: () => {
+    const newPoints = get().monitoringPoints.map((m) => {
+      const delta = (Math.random() - 0.5) * 3;
+      const newValue = Number(Math.max(0, m.currentValue + delta).toFixed(1));
+      const newStatus: MonitoringPoint['status'] = newValue >= m.threshold
+        ? 'danger'
+        : newValue >= m.warningThreshold
+          ? 'warning'
+          : 'normal';
+      return {
+        point: m,
+        newValue,
+        newStatus,
+        shouldTrigger: newStatus === 'danger' && m.status !== 'danger',
+      };
+    });
+    newPoints.forEach((np) => {
+      if (np.shouldTrigger) {
+        get().addEventLog({ type: '预警', level: 'danger', content: `监测点${np.point.code}沉降值${np.newValue}mm，超过阈值${np.point.threshold}mm`, operator: '系统' });
+        get().shields.forEach((s) => get().adjustShieldParamsBySettlement(s.id));
+      }
+    });
     set({
-      monitoringPoints: get().monitoringPoints.map((m) => {
-        const delta = (Math.random() - 0.5) * 3;
-        const newValue = Number(Math.max(0, m.currentValue + delta).toFixed(1));
-        const newStatus: MonitoringPoint['status'] = newValue >= m.threshold
-          ? 'danger'
-          : newValue >= m.warningThreshold
-            ? 'warning'
-            : 'normal';
-        if (newStatus === 'danger' && m.status !== 'danger') {
-          get().addEventLog({ type: '预警', level: 'danger', content: `监测点${m.code}沉降值${newValue}mm，超过阈值${m.threshold}mm`, operator: '系统' });
-          get().shields.forEach((s) => get().adjustShieldParamsBySettlement(s.id));
-        }
-        return {
-          ...m,
-          currentValue: newValue,
-          status: newStatus,
-          trend: [...m.trend.slice(1), newValue],
-        };
-      }),
+      monitoringPoints: newPoints.map((np) => ({
+        ...np.point,
+        currentValue: np.newValue,
+        status: np.newStatus,
+        trend: [...np.point.trend.slice(1), np.newValue],
+      })),
     });
   },
 
   updateWorkers: () => {
+    const newWorkers = get().workers.map((w) => {
+      const isOvertime = w.area === '密闭舱室' && w.enterTime
+        ? dayjs().diff(dayjs(w.enterTime), 'minute') > 30
+        : false;
+      return {
+        worker: w,
+        isOvertime,
+        shouldTrigger: isOvertime && w.status !== 'overtime',
+      };
+    });
+    newWorkers.forEach((nw) => {
+      if (nw.shouldTrigger) {
+        get().addEventLog({ type: '预警', level: 'warning', content: `${nw.worker.jobType}${nw.worker.name}进入密闭舱室超过30分钟`, operator: '系统' });
+      }
+    });
     set({
-      workers: get().workers.map((w) => {
-        const isOvertime = w.area === '密闭舱室' && w.enterTime
-          ? dayjs().diff(dayjs(w.enterTime), 'minute') > 30
-          : false;
-        if (isOvertime && w.status !== 'overtime') {
-          get().addEventLog({ type: '预警', level: 'warning', content: `${w.jobType}${w.name}进入密闭舱室超过30分钟`, operator: '系统' });
-        }
-        return {
-          ...w,
-          position: {
-            x: w.position.x + (Math.random() - 0.5) * 0.3,
-            y: w.position.y,
-            z: w.position.z + (Math.random() - 0.5) * 0.3,
-          },
-          status: isOvertime ? 'overtime' : 'normal',
-        };
-      }),
+      workers: newWorkers.map((nw) => ({
+        ...nw.worker,
+        position: {
+          x: nw.worker.position.x + (Math.random() - 0.5) * 0.3,
+          y: nw.worker.position.y,
+          z: nw.worker.position.z + (Math.random() - 0.5) * 0.3,
+        },
+        status: nw.isOvertime ? 'overtime' : 'normal',
+      })),
     });
   },
 
@@ -205,54 +220,58 @@ const useStore = create<AppState>((set, get) => ({
   },
 
   approvePurchasePlan: (planId, roleIndex, opinion) => {
+    const plan = get().purchasePlans.find((p) => p.id === planId);
+    if (!plan) return;
+    const newApprovals = [...plan.approvals];
+    const roleData = newApprovals[roleIndex];
+    newApprovals[roleIndex] = {
+      ...roleData,
+      status: 'approved',
+      time: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      opinion,
+    };
+    const allApproved = newApprovals.every((a) => a.status === 'approved');
+    const nextStatus: PurchasePlan['status'] = allApproved
+      ? 'approved'
+      : roleIndex === 0
+        ? 'level1'
+        : roleIndex === 1
+          ? 'level2'
+          : 'approved';
+    get().addEventLog({
+      type: '审批',
+      level: 'info',
+      content: `${roleData.role}${roleData.user}通过采购计划${plan.id.toUpperCase()}`,
+      operator: get().currentUser?.username,
+    });
     set({
-      purchasePlans: get().purchasePlans.map((p) => {
-        if (p.id !== planId) return p;
-        const newApprovals = [...p.approvals];
-        newApprovals[roleIndex] = {
-          ...newApprovals[roleIndex],
-          status: 'approved',
-          time: dayjs().format('YYYY-MM-DD HH:mm:ss'),
-          opinion,
-        };
-        const allApproved = newApprovals.every((a) => a.status === 'approved');
-        const nextStatus: PurchasePlan['status'] = allApproved
-          ? 'approved'
-          : roleIndex === 0
-            ? 'level1'
-            : roleIndex === 1
-              ? 'level2'
-              : 'approved';
-        get().addEventLog({
-          type: '审批',
-          level: 'info',
-          content: `${newApprovals[roleIndex].role}${newApprovals[roleIndex].user}通过采购计划${p.id.toUpperCase()}`,
-          operator: get().currentUser?.username,
-        });
-        return { ...p, approvals: newApprovals, status: nextStatus };
-      }),
+      purchasePlans: get().purchasePlans.map((p) =>
+        p.id === planId ? { ...p, approvals: newApprovals, status: nextStatus } : p,
+      ),
     });
   },
 
   rejectPurchasePlan: (planId, roleIndex, opinion) => {
+    const plan = get().purchasePlans.find((p) => p.id === planId);
+    if (!plan) return;
+    const newApprovals = [...plan.approvals];
+    const roleData = newApprovals[roleIndex];
+    newApprovals[roleIndex] = {
+      ...roleData,
+      status: 'rejected',
+      time: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      opinion,
+    };
+    get().addEventLog({
+      type: '审批',
+      level: 'warning',
+      content: `${roleData.role}${roleData.user}驳回采购计划${plan.id.toUpperCase()}`,
+      operator: get().currentUser?.username,
+    });
     set({
-      purchasePlans: get().purchasePlans.map((p) => {
-        if (p.id !== planId) return p;
-        const newApprovals = [...p.approvals];
-        newApprovals[roleIndex] = {
-          ...newApprovals[roleIndex],
-          status: 'rejected',
-          time: dayjs().format('YYYY-MM-DD HH:mm:ss'),
-          opinion,
-        };
-        get().addEventLog({
-          type: '审批',
-          level: 'warning',
-          content: `${newApprovals[roleIndex].role}${newApprovals[roleIndex].user}驳回采购计划${p.id.toUpperCase()}`,
-          operator: get().currentUser?.username,
-        });
-        return { ...p, approvals: newApprovals, status: 'rejected' };
-      }),
+      purchasePlans: get().purchasePlans.map((p) =>
+        p.id === planId ? { ...p, approvals: newApprovals, status: 'rejected' } : p,
+      ),
     });
   },
 

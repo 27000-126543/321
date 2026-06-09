@@ -163,7 +163,7 @@ export const mockMaintenanceOrders: MaintenanceOrder[] = [
     shieldId: 's2',
     shieldName: '中铁装备2号',
     type: '300环保养',
-    triggerRings: 200,
+    triggerRings: 300,
     createTime: dayjs().subtract(5, 'day').format('YYYY-MM-DD HH:mm:ss'),
     status: 'completed',
     items: ['更换主轴承密封件', '检查液压系统油位', '清洗过滤器'],

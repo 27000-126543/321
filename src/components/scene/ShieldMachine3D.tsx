@@ -16,8 +16,7 @@ export default function ShieldMachine3D({
   selectedShieldId,
   onClick,
 }: ShieldMachine3DProps) {
-  const { id, code, position, rotation, status, history24h, ...rest } = shield;
-  void rest; void history24h;
+  const { id, code, name, position, rotation, status, thrustSpeed, cutterTorque, groutingPressure, totalRings } = shield;
   const cutterRef = useRef<THREE.Mesh>(null);
   const isSelected = id === selectedShieldId;
 
@@ -233,7 +232,7 @@ export default function ShieldMachine3D({
       </mesh>
 
       <Html
-        position={[0, 4, 0]}
+        position={[0, 5.2, 0]}
         center
         distanceFactor={8}
         style={{ pointerEvents: 'none' }}
@@ -241,27 +240,59 @@ export default function ShieldMachine3D({
         <div
           style={{
             background: isSelected
-              ? 'linear-gradient(135deg, #3498db 0%, #2980b9 100%)'
-              : 'rgba(255, 255, 255, 0.92)',
-            color: isSelected ? '#ffffff' : '#2c3e50',
-            padding: '6px 14px',
-            borderRadius: '6px',
-            fontWeight: 700,
-            fontSize: '14px',
+              ? 'linear-gradient(135deg, rgba(52, 152, 219, 0.95) 0%, rgba(41, 128, 185, 0.95) 100%)'
+              : 'rgba(15, 23, 42, 0.92)',
+            color: '#f1f5f9',
+            padding: '10px 14px',
+            borderRadius: '8px',
+            fontSize: '12px',
             fontFamily:
-              '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+              '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "PingFang SC", sans-serif',
             whiteSpace: 'nowrap',
             boxShadow: isSelected
-              ? '0 0 16px rgba(52, 152, 219, 0.8), 0 4px 12px rgba(0,0,0,0.2)'
-              : '0 2px 8px rgba(0,0,0,0.15)',
+              ? '0 0 18px rgba(52, 152, 219, 0.8), 0 6px 16px rgba(0,0,0,0.3)'
+              : '0 4px 12px rgba(0,0,0,0.3)',
             border: isSelected
-              ? '2px solid rgba(255,255,255,0.6)'
-              : '1px solid rgba(0,0,0,0.1)',
-            letterSpacing: '0.5px',
-            transition: 'all 0.2s ease',
+              ? '2px solid rgba(255,255,255,0.7)'
+              : '1px solid rgba(24,144,255,0.4)',
+            letterSpacing: '0.2px',
+            transition: 'all 0.25s ease',
+            minWidth: '210px',
           }}
         >
-          {code}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px', paddingBottom: '6px', borderBottom: '1px solid ' + (isSelected ? 'rgba(255,255,255,0.3)' : 'rgba(24,144,255,0.3)') }}>
+            <span style={{ fontWeight: 700, fontSize: '13px', color: isSelected ? '#ffffff' : '#60a5fa' }}>
+              【{code}】{name}
+            </span>
+            <span style={{
+              fontSize: '10px',
+              padding: '2px 6px',
+              borderRadius: '10px',
+              background: status === 'normal' ? 'rgba(34,197,94,0.25)' : status === 'warning' ? 'rgba(249,115,22,0.25)' : 'rgba(100,116,139,0.35)',
+              color: status === 'normal' ? '#86efac' : status === 'warning' ? '#fdba74' : '#cbd5e1',
+              border: `1px solid ${status === 'normal' ? 'rgba(34,197,94,0.5)' : status === 'warning' ? 'rgba(249,115,22,0.5)' : 'rgba(100,116,139,0.5)'}`,
+            }}>
+              {status === 'normal' ? '正常' : status === 'warning' ? '预警' : '维护'}
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '4px 12px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#94a3b8' }}>推进速度</span>
+              <span style={{ color: '#60a5fa', fontWeight: 700 }}>{thrustSpeed.toFixed(1)}<span style={{ color: '#64748b', fontSize: '10px', marginLeft: '2px' }}>mm/min</span></span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#94a3b8' }}>刀盘扭矩</span>
+              <span style={{ color: '#fb923c', fontWeight: 700 }}>{cutterTorque}<span style={{ color: '#64748b', fontSize: '10px', marginLeft: '2px' }}>kN·m</span></span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#94a3b8' }}>注浆压力</span>
+              <span style={{ color: '#4ade80', fontWeight: 700 }}>{groutingPressure.toFixed(2)}<span style={{ color: '#64748b', fontSize: '10px', marginLeft: '2px' }}>bar</span></span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span style={{ color: '#94a3b8' }}>累计环数</span>
+              <span style={{ color: '#c084fc', fontWeight: 700 }}>{totalRings}<span style={{ color: '#64748b', fontSize: '10px', marginLeft: '2px' }}>环</span></span>
+            </div>
+          </div>
         </div>
       </Html>
 

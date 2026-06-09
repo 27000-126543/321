@@ -1,6 +1,6 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { FileDown, Eye, Printer, Calendar, Building2, User, Clock, PieChart as PieChartIcon, List, ArrowLeft, LogOut } from 'lucide-react';
+import { FileDown, Eye, Printer, Calendar, Building2, User, PieChart as PieChartIcon, List, ArrowLeft, LogOut } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { DatePicker, Input, message } from 'antd';
 import type { Dayjs } from 'dayjs';
@@ -37,47 +37,76 @@ export default function ExportReport() {
   const [projectName, setProjectName] = useState('XX地铁1号线XX标项目');
   const [isPreview, setIsPreview] = useState(true);
 
+  const diffDay = Math.max(0, dayjs().diff(selectedDate, 'day'));
+
   const todayRingsData = useMemo(() => {
     return shields.map((shield) => {
       const history = shield.history24h;
       const firstRings = history.length > 0 ? history[0].rings : 0;
       const lastRings = history.length > 0 ? history[history.length - 1].rings : shield.totalRings;
-      const todayRings = Math.max(0, lastRings - firstRings);
+      let todayRings = Math.max(0, lastRings - firstRings);
+      let totalRings = shield.totalRings;
+      todayRings = Math.max(0, todayRings - diffDay * 3);
+      totalRings = Math.max(0, totalRings - diffDay * 3);
+      const speedOffset = diffDay * ((shield.id.charCodeAt(shield.id.length - 1) % 5) - 2) * 0.3;
       const avgSpeed = history.length > 0
-        ? (history.reduce((sum, h) => sum + h.thrustSpeed, 0) / history.length).toFixed(1)
-        : shield.thrustSpeed.toFixed(1);
+        ? Math.max(10, Number((history.reduce((sum, h) => sum + h.thrustSpeed, 0) / history.length + speedOffset).toFixed(1)))
+        : Math.max(10, Number((shield.thrustSpeed + speedOffset).toFixed(1)));
+      const torqueOffset = diffDay * ((shield.id.charCodeAt(0) % 5) - 2) * 80;
       const maxTorque = history.length > 0
-        ? Math.max(...history.map((h) => h.cutterTorque))
-        : shield.cutterTorque;
+        ? Math.max(2000, Math.min(6000, Math.max(...history.map((h) => h.cutterTorque)) + Math.floor(torqueOffset)))
+        : Math.max(2000, Math.min(6000, shield.cutterTorque + Math.floor(torqueOffset)));
       const runHours = 24;
       return {
         ...shield,
         todayRings,
-        avgSpeed: Number(avgSpeed),
+        totalRings,
+        avgSpeed,
         maxTorque,
         runHours,
       };
     });
-  }, [shields]);
+  }, [shields, diffDay]);
 
   const monitoringDisplay = useMemo(() => {
     return monitoringPoints.map((point) => {
-      const prevValue = point.trend.length > 1 ? point.trend[point.trend.length - 2] : point.currentValue;
-      const change = Number((point.currentValue - prevValue).toFixed(1));
-      const statusText = point.status === 'normal' ? '正常' : point.status === 'warning' ? '预警' : '危险';
-      const remark = point.status === 'danger'
+      const offsetValue = Number((diffDay * 0.5 + (point.id.charCodeAt(point.id.length - 1) % 3) * 0.1).toFixed(1));
+      const currentValue = Number(Math.max(0, point.currentValue - offsetValue).toFixed(1));
+      const trendPrev = point.trend.length > 1 ? Math.max(0, point.trend[point.trend.length - 2] - offsetValue * 0.8) : currentValue;
+      const change = Number((currentValue - trendPrev).toFixed(1));
+      const newStatus: 'normal' | 'warning' | 'danger' = currentValue >= point.threshold
+        ? 'danger'
+        : currentValue >= point.warningThreshold
+          ? 'warning'
+          : 'normal';
+      const statusText = newStatus === 'normal' ? '正常' : newStatus === 'warning' ? '预警' : '危险';
+      const remark = newStatus === 'danger'
         ? '超过阈值，需立即处理'
-        : point.status === 'warning'
+        : newStatus === 'warning'
           ? '接近阈值，持续关注'
           : '-';
       return {
         ...point,
+        currentValue,
         change,
+        status: newStatus,
         statusText,
         remark,
       };
     });
-  }, [monitoringPoints]);
+  }, [monitoringPoints, diffDay]);
+
+  const filteredEventLogs = useMemo(() => {
+    const keepCount = Math.max(0, eventLogs.length - diffDay * 2);
+    return eventLogs.slice(0, keepCount).map((log) => {
+      const logTime = dayjs().subtract(diffDay, 'day').format('YYYY-MM-DD') + ' ' + log.time;
+      return {
+        ...log,
+        originalTime: log.time,
+        displayDate: dayjs(logTime, 'YYYY-MM-DD HH:mm:ss').format('HH:mm:ss'),
+      };
+    });
+  }, [eventLogs, diffDay]);
 
   const eventStats = useMemo(() => {
     const counts: Record<EventType, number> = {
@@ -87,7 +116,7 @@ export default function ExportReport() {
       应急: 0,
       进度: 0,
     };
-    eventLogs.forEach((log) => {
+    filteredEventLogs.forEach((log) => {
       counts[log.type] = (counts[log.type] || 0) + 1;
     });
     return eventTypeList.map((type) => ({
@@ -95,7 +124,7 @@ export default function ExportReport() {
       value: counts[type] || 0,
       color: COLORS[type],
     })).filter((d) => d.value > 0);
-  }, [eventLogs]);
+  }, [filteredEventLogs]);
 
   const totalEvents = eventStats.reduce((sum, d) => sum + d.value, 0);
 
@@ -122,11 +151,11 @@ export default function ExportReport() {
         ['打印时间', printTime],
         [],
         ['报表摘要'],
-        ['盾构机数量', shields.length],
+        ['盾构机数量', todayRingsData.length],
         ['当日掘进总环数', todayRingsData.reduce((s, r) => s + r.todayRings, 0)],
-        ['监测点数量', monitoringPoints.length],
-        ['危险监测点', monitoringPoints.filter(m => m.status === 'danger').length],
-        ['预警监测点', monitoringPoints.filter(m => m.status === 'warning').length],
+        ['监测点数量', monitoringDisplay.length],
+        ['危险监测点', monitoringDisplay.filter(m => m.status === 'danger').length],
+        ['预警监测点', monitoringDisplay.filter(m => m.status === 'warning').length],
         ['今日事件总数', totalEvents],
       ];
       const wsCover = XLSX.utils.aoa_to_sheet(coverData);
@@ -204,8 +233,8 @@ export default function ExportReport() {
       XLSX.utils.book_append_sheet(wb, wsMonitor, '沉降记录');
 
       const eventHeaders = ['时间', '类型', '级别', '内容', '操作人'];
-      const eventRows = eventLogs.map((e) => [
-        e.time,
+      const eventRows = filteredEventLogs.map((e) => [
+        e.displayDate,
         e.type,
         e.level === 'info' ? '信息' : e.level === 'warning' ? '警告' : '危险',
         e.content,
@@ -216,7 +245,7 @@ export default function ExportReport() {
         ['事件统计汇总'],
         ['类型', '数量', '占比'],
         ...eventTypeList.map((t) => {
-          const count = eventLogs.filter(e => e.type === t).length;
+          const count = filteredEventLogs.filter(e => e.type === t).length;
           const pct = totalEvents > 0 ? `${((count / totalEvents) * 100).toFixed(1)}%` : '0%';
           return [t, count, pct];
         }),
@@ -510,9 +539,9 @@ export default function ExportReport() {
                   <h2 className="text-xl font-bold text-gray-800">沉降监测记录</h2>
                   <div className="flex-1 h-px bg-gray-200 ml-2" />
                   <span className="text-xs text-gray-400">
-                    共 {monitoringPoints.length} 个监测点 ·
-                    <span className="text-tech-red mx-1">{monitoringPoints.filter(m => m.status === 'danger').length}</span>危险 ·
-                    <span className="text-tech-orange mx-1">{monitoringPoints.filter(m => m.status === 'warning').length}</span>预警
+                    共 {monitoringDisplay.length} 个监测点 ·
+                    <span className="text-tech-red mx-1">{monitoringDisplay.filter(m => m.status === 'danger').length}</span>危险 ·
+                    <span className="text-tech-orange mx-1">{monitoringDisplay.filter(m => m.status === 'warning').length}</span>预警
                   </span>
                 </div>
                 <div className="overflow-hidden rounded-lg border border-gray-200">
@@ -616,7 +645,7 @@ export default function ExportReport() {
                     )}
                     <div className="grid grid-cols-5 gap-2 mt-2">
                       {eventTypeList.map((type) => {
-                        const count = eventLogs.filter(e => e.type === type).length;
+                        const count = filteredEventLogs.filter(e => e.type === type).length;
                         const pct = totalEvents > 0 ? ((count / totalEvents) * 100).toFixed(0) : '0';
                         return (
                           <div key={type} className="text-center">
@@ -640,12 +669,12 @@ export default function ExportReport() {
                       <span className="font-semibold text-gray-700">详细事件列表</span>
                     </div>
                     <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
-                      {eventLogs.length === 0 ? (
+                      {filteredEventLogs.length === 0 ? (
                         <div className="h-56 flex items-center justify-center text-gray-400">
                           暂无事件记录
                         </div>
                       ) : (
-                        eventLogs.slice(0, 15).map((log) => (
+                        filteredEventLogs.slice(0, 15).map((log) => (
                           <div
                             key={log.id}
                             className="flex items-start gap-2 p-2 rounded-md bg-white border border-gray-100 hover:border-gray-200 transition-colors"
@@ -676,7 +705,7 @@ export default function ExportReport() {
                                   {log.level === 'info' ? '信息' : log.level === 'warning' ? '警告' : '危险'}
                                 </span>
                                 <span className="text-[10px] text-gray-400 font-mono ml-auto">
-                                  {log.time}
+                                  {log.displayDate}
                                 </span>
                               </div>
                               <p className="text-xs text-gray-600 leading-relaxed break-words">
@@ -690,9 +719,9 @@ export default function ExportReport() {
                         ))
                       )}
                     </div>
-                    {eventLogs.length > 15 && (
+                    {filteredEventLogs.length > 15 && (
                       <div className="mt-2 text-center text-xs text-gray-400">
-                        共 {eventLogs.length} 条记录，仅显示前15条
+                        共 {filteredEventLogs.length} 条记录，仅显示前15条
                       </div>
                     )}
                   </div>

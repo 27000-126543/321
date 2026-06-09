@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { Progress, Tooltip, Modal } from 'antd';
+import { Progress, Tooltip } from 'antd';
 import {
   Users,
   AlertTriangle,
@@ -16,7 +16,7 @@ import {
 import dayjs from 'dayjs';
 import useStore from '@/store/useStore';
 import { cn } from '@/lib/utils';
-import { ShieldMachine, MonitoringPoint, EventLog, StationNode, EventType, EventLevel } from '@/types';
+import type { MonitoringPoint, StationNode, EventType, EventLevel } from '@/types';
 
 const HudCorners: React.FC<{ className?: string }> = ({ className = '' }) => (
   <>
@@ -26,57 +26,6 @@ const HudCorners: React.FC<{ className?: string }> = ({ className = '' }) => (
     <div className={cn('hud-corner-br', className)} />
   </>
 );
-
-const ShieldChartModalContent: React.FC<{ shield: ShieldMachine | null }> = ({ shield }) => {
-  if (!shield) return null;
-  return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <h3 className="text-lg font-bold text-white">{shield.name}</h3>
-          <p className="text-sm text-gray-400">{shield.code}</p>
-        </div>
-        <span
-          className={cn(
-            'px-3 py-1 rounded-full text-xs font-medium',
-            shield.status === 'normal' && 'bg-tech-green/20 text-tech-green border border-tech-green/40',
-            shield.status === 'warning' && 'bg-tech-orange/20 text-tech-orange border border-tech-orange/40',
-            shield.status === 'maintenance' && 'bg-gray-500/20 text-gray-300 border border-gray-500/40',
-          )}
-        >
-          {shield.status === 'normal' ? '正常运行' : shield.status === 'warning' ? '预警中' : '维护中'}
-        </span>
-      </div>
-      <div className="grid grid-cols-2 gap-4">
-        {[
-          { label: '推进速度', value: shield.thrustSpeed, unit: 'mm/min', color: '#1890FF', max: 60 },
-          { label: '刀盘扭矩', value: shield.cutterTorque, unit: 'kN·m', color: '#FA8C16', max: 6000 },
-          { label: '注浆压力', value: shield.groutingPressure, unit: 'bar', color: '#52C41A', max: 3.5 },
-          { label: '累计环数', value: shield.totalRings, unit: '环', color: '#722ED1', max: 1000 },
-        ].map((item) => (
-          <div key={item.label} className="tech-panel p-4 rounded-lg relative overflow-hidden">
-            <HudCorners />
-            <p className="text-sm text-gray-400 mb-2">{item.label}</p>
-            <p className="text-2xl font-bold font-orbitron" style={{ color: item.color }}>
-              {item.value} <span className="text-sm font-normal text-gray-400">{item.unit}</span>
-            </p>
-            <div className="mt-3 h-2 bg-gray-800 rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full transition-all duration-500"
-                style={{
-                  width: `${Math.min((item.value / item.max) * 100, 100)}%`,
-                  backgroundColor: item.color,
-                  boxShadow: `0 0 10px ${item.color}`,
-                }}
-              />
-            </div>
-            <p className="text-xs text-gray-500 mt-1 text-right">{((item.value / item.max) * 100).toFixed(1)}% / {item.max}{item.unit}</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
 
 export const TopNavbar: React.FC = () => {
   const [currentTime, setCurrentTime] = useState(dayjs().format('YYYY-MM-DD HH:mm:ss'));
@@ -279,14 +228,6 @@ export const ShieldInfoPanel: React.FC = () => {
   const shields = useStore((s) => s.shields);
   const selectedShieldId = useStore((s) => s.selectedShieldId);
   const setSelectedShield = useStore((s) => s.setSelectedShield);
-  const [modalOpen, setModalOpen] = useState(false);
-
-  const selectedShield = shields.find((s) => s.id === selectedShieldId) || null;
-
-  const handleCardClick = (id: string) => {
-    setSelectedShield(id);
-    setModalOpen(true);
-  };
 
   const statusConfig = {
     normal: { label: '正常', className: 'bg-tech-green/20 text-tech-green border-tech-green/40' },
@@ -317,7 +258,7 @@ export const ShieldInfoPanel: React.FC = () => {
               <span className="w-1 h-5 bg-tech-blue rounded-full" />
               盾构机状态
             </h2>
-            <span className="text-xs text-gray-400">共 {shields.length} 台</span>
+            <span className="text-xs text-gray-400">共 {shields.length} 台 · 点击查看24h曲线</span>
           </div>
 
           <div className="space-y-3 max-h-[340px] overflow-y-auto pr-1">
@@ -329,7 +270,7 @@ export const ShieldInfoPanel: React.FC = () => {
                   initial={{ opacity: 0, scale: 0.95 }}
                   animate={{ opacity: 1, scale: 1 }}
                   transition={{ duration: 0.3, delay: 0.1 * index }}
-                  onClick={() => handleCardClick(shield.id)}
+                  onClick={() => setSelectedShield(isSelected ? null : shield.id)}
                   className={cn(
                     'p-3 rounded-lg border cursor-pointer transition-all duration-300 relative overflow-hidden',
                     isSelected
@@ -382,22 +323,6 @@ export const ShieldInfoPanel: React.FC = () => {
           </div>
         </div>
       </div>
-
-      <Modal
-        open={modalOpen}
-        onCancel={() => setModalOpen(false)}
-        footer={null}
-        centered
-        width={560}
-        styles={{
-          content: { background: 'rgba(16, 30, 54, 0.95)', border: '1px solid rgba(24,144,255,0.4)', borderRadius: 12 },
-          header: { background: 'transparent', borderBottom: '1px solid rgba(24,144,255,0.2)' },
-          body: { padding: '24px' },
-        }}
-        title={null}
-      >
-        <ShieldChartModalContent shield={selectedShield} />
-      </Modal>
     </motion.div>
   );
 };
@@ -408,12 +333,6 @@ const eventTypeColors: Record<EventType, string> = {
   工单: 'bg-tech-orange/20 text-tech-orange border-tech-orange/40',
   应急: 'bg-tech-purple/20 text-tech-purple border-tech-purple/40',
   进度: 'bg-tech-green/20 text-tech-green border-tech-green/40',
-};
-
-const eventLevelColors: Record<EventLevel, string> = {
-  info: 'bg-tech-cyan',
-  warning: 'bg-tech-orange',
-  danger: 'bg-tech-red',
 };
 
 export const RightEventPanel: React.FC = () => {
