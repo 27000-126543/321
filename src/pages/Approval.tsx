@@ -58,7 +58,6 @@ export default function Approval() {
     currentUser,
     approvePurchasePlan,
     rejectPurchasePlan,
-    addEventLog,
   } = useStore();
 
   const [activeTab, setActiveTab] = useState<string>('all');
@@ -105,12 +104,6 @@ export default function Approval() {
     setTimeout(() => {
       approvePurchasePlan(selectedPlan.id, roleIdx, opinion || '同意');
       message.success('审批通过成功');
-      addEventLog({
-        type: '审批',
-        level: 'info',
-        content: `${currentUser.roleName}${currentUser.username}通过采购计划${selectedPlan.id.toUpperCase()}`,
-        operator: currentUser.username,
-      });
       setLoading(false);
       setModalOpen(false);
       setSelectedPlan(null);
@@ -129,12 +122,6 @@ export default function Approval() {
     setTimeout(() => {
       rejectPurchasePlan(selectedPlan.id, roleIdx, opinion);
       message.error('已驳回采购计划');
-      addEventLog({
-        type: '审批',
-        level: 'warning',
-        content: `${currentUser.roleName}${currentUser.username}驳回采购计划${selectedPlan.id.toUpperCase()}`,
-        operator: currentUser.username,
-      });
       setLoading(false);
       setModalOpen(false);
       setSelectedPlan(null);

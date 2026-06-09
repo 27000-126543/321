@@ -209,7 +209,7 @@ const useStore = create<AppState>((set, get) => ({
       eventLogs: [
         {
           id: `e${Date.now()}${Math.floor(Math.random() * 1000)}`,
-          time: dayjs().format('HH:mm:ss'),
+          time: dayjs().format('YYYY-MM-DD HH:mm:ss'),
           handleStatus: log.handleStatus ?? defaultStatus,
           handleRecords: log.handleRecords ?? [],
           ...log,

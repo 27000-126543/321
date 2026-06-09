@@ -80,7 +80,6 @@ export default function WorkOrder() {
     currentUser,
     completeMaintenance,
     startMaintenance,
-    addEventLog,
   } = useStore();
 
   const [modalOpen, setModalOpen] = useState(false);
@@ -120,12 +119,6 @@ export default function WorkOrder() {
     setTimeout(() => {
       completeMaintenance(selectedOrder.id, currentUser.username);
       message.success(`工单 ${selectedOrder.id.toUpperCase()} 已完成`);
-      addEventLog({
-        type: '工单',
-        level: 'info',
-        content: `${currentUser.roleName}${currentUser.username}完成保养工单${selectedOrder.id.toUpperCase()}`,
-        operator: currentUser.username,
-      });
       setLoading(false);
       setModalOpen(false);
       setSelectedOrder(null);
