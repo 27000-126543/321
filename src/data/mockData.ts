@@ -174,7 +174,7 @@ export const mockMaintenanceOrders: MaintenanceOrder[] = [
 export const mockEventLogs: EventLog[] = [
   {
     id: 'e1',
-    time: dayjs().subtract(5, 'minute').format('HH:mm:ss'),
+    time: dayjs().subtract(5, 'minute').format('YYYY-MM-DD HH:mm:ss'),
     type: '预警',
     level: 'danger',
     content: '监测点DB-004沉降值32.5mm，超过阈值30mm',
@@ -187,7 +187,7 @@ export const mockEventLogs: EventLog[] = [
   },
   {
     id: 'e2',
-    time: dayjs().subtract(15, 'minute').format('HH:mm:ss'),
+    time: dayjs().subtract(15, 'minute').format('YYYY-MM-DD HH:mm:ss'),
     type: '预警',
     level: 'warning',
     content: '注浆工赵伟进入密闭舱室超过30分钟',
@@ -202,7 +202,7 @@ export const mockEventLogs: EventLog[] = [
   },
   {
     id: 'e3',
-    time: dayjs().subtract(30, 'minute').format('HH:mm:ss'),
+    time: dayjs().subtract(1, 'day').hour(15).minute(32).second(18).format('YYYY-MM-DD HH:mm:ss'),
     type: '审批',
     level: 'info',
     content: '施工员张建国通过采购计划PP1',
@@ -215,7 +215,7 @@ export const mockEventLogs: EventLog[] = [
   },
   {
     id: 'e4',
-    time: dayjs().subtract(1, 'hour').format('HH:mm:ss'),
+    time: dayjs().subtract(1, 'day').hour(9).minute(12).second(45).format('YYYY-MM-DD HH:mm:ss'),
     type: '工单',
     level: 'warning',
     content: '中铁装备1号累计掘进328环，触发300环保养',
@@ -228,19 +228,19 @@ export const mockEventLogs: EventLog[] = [
   },
   {
     id: 'e5',
-    time: dayjs().subtract(2, 'hour').format('HH:mm:ss'),
+    time: dayjs().subtract(2, 'day').hour(11).minute(8).second(30).format('YYYY-MM-DD HH:mm:ss'),
     type: '进度',
     level: 'warning',
     content: '围护结构施工节点延期5天完成',
     operator: '系统',
     handleStatus: 'closed',
     handleRecords: [
-      { id: 'hr2', status: 'closed', handler: '李明辉', time: dayjs().subtract(1, 'hour').format('YYYY-MM-DD HH:mm:ss'), remark: '已调整后续节点计划' },
+      { id: 'hr2', status: 'closed', handler: '李明辉', time: dayjs().subtract(2, 'day').hour(16).minute(22).second(0).format('YYYY-MM-DD HH:mm:ss'), remark: '已调整后续节点计划' },
     ],
   },
   {
     id: 'e6',
-    time: dayjs().subtract(3, 'hour').format('HH:mm:ss'),
+    time: dayjs().subtract(3, 'day').hour(14).minute(45).second(0).format('YYYY-MM-DD HH:mm:ss'),
     type: '预警',
     level: 'warning',
     content: '监测点DB-007沉降值20.3mm，接近阈值',
@@ -253,7 +253,7 @@ export const mockEventLogs: EventLog[] = [
   },
   {
     id: 'e7',
-    time: dayjs().subtract(5, 'hour').format('HH:mm:ss'),
+    time: dayjs().subtract(3, 'day').hour(10).minute(5).second(20).format('YYYY-MM-DD HH:mm:ss'),
     type: '审批',
     level: 'info',
     content: '采购计划PP2已完成三级审批',

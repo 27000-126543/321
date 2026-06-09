@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Table,
   Tag,
@@ -75,6 +75,7 @@ const AnimatedNumber: React.FC<{ value: number; duration?: number; className?: s
 
 export default function WorkOrder() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const {
     maintenanceOrders,
     currentUser,
@@ -87,6 +88,17 @@ export default function WorkOrder() {
   const [selectedOrder, setSelectedOrder] = useState<MaintenanceOrder | null>(null);
   const [checkedItems, setCheckedItems] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const orderId = searchParams.get('orderId');
+    if (orderId) {
+      const order = maintenanceOrders.find((o) => o.id.toLowerCase() === orderId.toLowerCase());
+      if (order) {
+        setSelectedOrder(order);
+        setTimeout(() => setDetailModalOpen(true), 300);
+      }
+    }
+  }, [searchParams, maintenanceOrders]);
 
   const pendingCount = maintenanceOrders.filter((o) => o.status === 'pending').length;
   const inProgressCount = maintenanceOrders.filter((o) => o.status === 'inProgress').length;

@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { FileDown, Eye, Printer, Calendar, Building2, User, PieChart as PieChartIcon, List, ArrowLeft, LogOut, BarChart3 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { DatePicker, Input, message, Segmented } from 'antd';
+const { RangePicker } = DatePicker;
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -44,19 +45,20 @@ export default function ExportReport() {
   const navigate = useNavigate();
   const { shields, monitoringPoints, eventLogs, currentUser, logout } = useStore();
   const [reportMode, setReportMode] = useState<ReportMode>('daily');
-  const [singleDate, setSingleDate] = useState<Dayjs>(dayjs());
+  const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>([dayjs().startOf('day'), dayjs().endOf('day')]);
   const [projectName, setProjectName] = useState('XX地铁1号线XX标项目');
   const [isPreview, setIsPreview] = useState(true);
 
-  const dateRange = useMemo<[Dayjs, Dayjs]>(() => {
-    if (reportMode === 'daily') {
-      return [singleDate.startOf('day'), singleDate.endOf('day')];
-    } else if (reportMode === 'weekly') {
-      return [singleDate.startOf('week').add(1, 'day'), singleDate.endOf('week').add(1, 'day')];
+  const handleModeChange = (mode: ReportMode) => {
+    setReportMode(mode);
+    if (mode === 'daily') {
+      setDateRange([dayjs().startOf('day'), dayjs().endOf('day')]);
+    } else if (mode === 'weekly') {
+      setDateRange([dayjs().startOf('week').add(1, 'day'), dayjs().endOf('week').add(1, 'day')]);
     } else {
-      return [singleDate.startOf('month'), singleDate.endOf('month')];
+      setDateRange([dayjs().startOf('month'), dayjs().endOf('month')]);
     }
-  }, [reportMode, singleDate]);
+  };
 
   const [rangeStart, rangeEnd] = dateRange;
   const totalDays = Math.max(1, rangeEnd.diff(rangeStart, 'day') + 1);

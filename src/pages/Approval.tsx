@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   Tabs,
   Table,
@@ -53,6 +53,7 @@ const roleToIndex: Record<string, number> = {
 
 export default function Approval() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const {
     purchasePlans,
     currentUser,
@@ -65,6 +66,18 @@ export default function Approval() {
   const [selectedPlan, setSelectedPlan] = useState<PurchasePlan | null>(null);
   const [opinion, setOpinion] = useState('');
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    const planId = searchParams.get('planId');
+    if (planId) {
+      const plan = purchasePlans.find((p) => p.id.toLowerCase() === planId.toLowerCase());
+      if (plan) {
+        setSelectedPlan(plan);
+        setActiveTab('all');
+        setTimeout(() => setModalOpen(true), 300);
+      }
+    }
+  }, [searchParams, purchasePlans]);
 
   const filteredPlans = useMemo(() => {
     const filter = statusTabMap[activeTab];

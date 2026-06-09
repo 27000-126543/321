@@ -148,8 +148,9 @@ export default function EventCenter() {
       if (statusFilter && statusFilter.length > 0 && !statusFilter.includes(e.handleStatus || 'closed')) return false;
       if (operatorFilter && e.operator !== operatorFilter) return false;
       if (dateRange && dateRange[0] && dateRange[1]) {
-        const eventTime = dayjs().hour(parseInt(e.time.split(':')[0])).minute(parseInt(e.time.split(':')[1]));
-        if (eventTime.isBefore(dateRange[0], 'minute') || eventTime.isAfter(dateRange[1], 'minute')) return false;
+        const eventTime = dayjs(e.time, 'YYYY-MM-DD HH:mm:ss');
+        if (!eventTime.isValid()) return false;
+        if (eventTime.isBefore(dateRange[0].startOf('day')) || eventTime.isAfter(dateRange[1].endOf('day'))) return false;
       }
       return true;
     });
@@ -192,21 +193,22 @@ export default function EventCenter() {
 
   const goToRelated = (event: EventLog) => {
     if (!event.relatedType || !event.relatedId) return;
+    const id = event.relatedId;
     switch (event.relatedType) {
       case 'purchasePlan':
-        navigate('/approval');
+        navigate(`/approval?planId=${id}`);
         break;
       case 'maintenanceOrder':
-        navigate('/workorder');
+        navigate(`/workorder?orderId=${id}`);
         break;
       case 'shield':
-        navigate('/dashboard');
+        navigate(`/dashboard?shieldId=${id}`);
         break;
       case 'monitoringPoint':
-        navigate('/dashboard');
+        navigate(`/dashboard?mpId=${id}`);
         break;
       case 'worker':
-        navigate('/dashboard');
+        navigate(`/dashboard?workerId=${id}`);
         break;
       case 'emergency':
         navigate('/emergency');
