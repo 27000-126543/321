@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import Scene3D from '@/components/scene/Scene3D';
 import panels from '@/components/panels/DashboardPanels';
 import ShieldChartModal from '@/components/panels/ShieldChartModal';
@@ -7,7 +8,26 @@ import useStore from '@/store/useStore';
 const { TopNavbar, LeftNavPanel, ShieldInfoPanel, RightEventPanel, BottomProgressPanel } = panels;
 
 export default function Dashboard() {
-  const { selectedShieldId, setSelectedShield } = useStore();
+  const {
+    selectedShieldId,
+    setSelectedShield,
+    setSelectedMonitoring,
+    setHighlightMonitoring,
+  } = useStore();
+  const [searchParams] = useSearchParams();
+
+  useEffect(() => {
+    const shieldId = searchParams.get('shieldId');
+    if (shieldId) {
+      setSelectedShield(shieldId);
+    }
+    const mpId = searchParams.get('mpId');
+    if (mpId) {
+      setSelectedMonitoring(mpId);
+      setHighlightMonitoring(mpId);
+      setTimeout(() => setHighlightMonitoring(null), 5000);
+    }
+  }, [searchParams, setSelectedShield, setSelectedMonitoring, setHighlightMonitoring]);
 
   useEffect(() => {
     const timer = setInterval(() => {}, 1000);

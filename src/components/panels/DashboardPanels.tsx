@@ -337,6 +337,13 @@ const eventTypeColors: Record<EventType, string> = {
   进度: 'bg-tech-green/20 text-tech-green border-tech-green/40',
 };
 
+const formatEventTime = (timeStr: string): string => {
+  const t = dayjs(timeStr, 'YYYY-MM-DD HH:mm:ss');
+  if (!t.isValid()) return timeStr;
+  if (t.isSame(dayjs(), 'day')) return t.format('HH:mm:ss');
+  return t.format('MM-DD HH:mm');
+};
+
 const handleStatusBadge: Record<EventHandleStatus, { label: string; cls: string; dot: string }> = {
   pending: { label: '待处理', cls: 'bg-tech-red/10 text-tech-red border-tech-red/40', dot: 'bg-tech-red animate-pulse' },
   inProgress: { label: '处理中', cls: 'bg-tech-orange/10 text-tech-orange border-tech-orange/40', dot: 'bg-tech-orange animate-pulse' },
@@ -510,7 +517,7 @@ export const RightEventPanel: React.FC = () => {
                           <span className={cn('px-2 py-0.5 rounded-full text-[10px] font-medium border', eventTypeColors[log.type])}>
                             {log.type}
                           </span>
-                          <span className="text-[10px] text-gray-500 font-mono">{log.time}</span>
+                          <span className="text-[10px] text-gray-500 font-mono">{formatEventTime(log.time)}</span>
                         </div>
                         <p className="text-xs text-gray-300 leading-relaxed break-words">{log.content}</p>
                         {log.operator && (

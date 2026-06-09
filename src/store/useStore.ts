@@ -44,6 +44,8 @@ interface AppState {
   selectedShieldId: string | null;
   selectedSegmentId: string | null;
   selectedMonitoringId: string | null;
+  openShieldChartForId: string | null;
+  highlightMonitoringId: string | null;
 
   login: (role: UserRole) => boolean;
   logout: () => void;
@@ -66,6 +68,8 @@ interface AppState {
   setSelectedShield: (id: string | null) => void;
   setSelectedSegment: (id: string | null) => void;
   setSelectedMonitoring: (id: string | null) => void;
+  setOpenShieldChart: (id: string | null) => void;
+  setHighlightMonitoring: (id: string | null) => void;
 
   adjustShieldParamsBySettlement: (shieldId: string) => void;
   generatePurchasePlanIfNeeded: () => void;
@@ -89,6 +93,8 @@ const useStore = create<AppState>((set, get) => ({
   selectedShieldId: null,
   selectedSegmentId: null,
   selectedMonitoringId: null,
+  openShieldChartForId: null,
+  highlightMonitoringId: null,
 
   login: (role) => {
     const user = mockUsers.find((u) => u.role === role);
@@ -291,6 +297,9 @@ const useStore = create<AppState>((set, get) => ({
       level: 'info',
       content: `${roleData.role}${roleData.user}通过采购计划${plan.id.toUpperCase()}`,
       operator: get().currentUser?.username,
+      relatedType: 'purchasePlan',
+      relatedId: plan.id,
+      relatedName: plan.id.toUpperCase(),
     });
     set({
       purchasePlans: get().purchasePlans.map((p) =>
@@ -365,6 +374,8 @@ const useStore = create<AppState>((set, get) => ({
   setSelectedShield: (id) => set({ selectedShieldId: id }),
   setSelectedSegment: (id) => set({ selectedSegmentId: id }),
   setSelectedMonitoring: (id) => set({ selectedMonitoringId: id }),
+  setOpenShieldChart: (id) => set({ openShieldChartForId: id }),
+  setHighlightMonitoring: (id) => set({ highlightMonitoringId: id }),
 
   adjustShieldParamsBySettlement: (shieldId) => {
     const shield = get().shields.find((s) => s.id === shieldId);

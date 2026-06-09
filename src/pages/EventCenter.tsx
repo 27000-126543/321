@@ -103,7 +103,7 @@ const relatedTypeIcons: Record<EventRelatedType, React.ReactNode> = {
 
 export default function EventCenter() {
   const navigate = useNavigate();
-  const { eventLogs, currentUser, updateEventStatus } = useStore();
+  const { eventLogs, currentUser, updateEventStatus, purchasePlans, maintenanceOrders, monitoringPoints, shields } = useStore();
 
   const [typeFilter, setTypeFilter] = useState<EventType[] | undefined>();
   const [levelFilter, setLevelFilter] = useState<EventLevel[] | undefined>();
@@ -150,7 +150,7 @@ export default function EventCenter() {
       if (dateRange && dateRange[0] && dateRange[1]) {
         const eventTime = dayjs(e.time, 'YYYY-MM-DD HH:mm:ss');
         if (!eventTime.isValid()) return false;
-        if (eventTime.isBefore(dateRange[0].startOf('day')) || eventTime.isAfter(dateRange[1].endOf('day'))) return false;
+        if (eventTime.isBefore(dateRange[0]) || eventTime.isAfter(dateRange[1])) return false;
       }
       return true;
     });
@@ -241,9 +241,9 @@ export default function EventCenter() {
     {
       title: '时间',
       dataIndex: 'time',
-      width: 110,
+      width: 170,
       fixed: 'left',
-      render: (v) => <span className="font-mono text-gray-300">{v}</span>,
+      render: (v) => <span className="font-mono text-gray-300 text-xs">{v}</span>,
     },
     {
       title: '类型',
@@ -627,6 +627,304 @@ export default function EventCenter() {
                   >
                     跳转查看
                   </Button>
+                </div>
+              </div>
+            )}
+
+            {(selectedEvent.relatedType === 'purchasePlan' ||
+              selectedEvent.relatedType === 'maintenanceOrder' ||
+              selectedEvent.relatedType === 'monitoringPoint' ||
+              selectedEvent.relatedType === 'shield') && (
+              <div>
+                <div className="flex items-center gap-2 mb-3">
+                  <div className="w-1 h-4 bg-tech-cyan rounded-full" />
+                  <h3 className="text-sm font-semibold text-white">关联链路视图</h3>
+                </div>
+                <div className="bg-gradient-to-br from-tech-cyan/5 to-tech-blue/5 rounded-lg p-4 border border-tech-cyan/30">
+                  {selectedEvent.relatedType === 'purchasePlan' && (() => {
+                    const plan = purchasePlans.find((p) => p.id === selectedEvent.relatedId);
+                    if (!plan) return <p className="text-xs text-gray-500 text-center py-6">未找到对应的采购计划</p>;
+                    const statusConfig: Record<string, { text: string; cls: string }> = {
+                      draft: { text: '待提交', cls: 'text-gray-400' },
+                      level1: { text: '施工员已通过', cls: 'text-tech-blue' },
+                      level2: { text: '项目经理已通过', cls: 'text-tech-cyan' },
+                      approved: { text: '三级审批通过', cls: 'text-tech-green' },
+                      rejected: { text: '已驳回', cls: 'text-tech-red' },
+                    };
+                    const cfg = statusConfig[plan.status] || statusConfig.draft;
+                    return (
+                      <div>
+                        <div className="flex items-center justify-between mb-4 pb-3 border-b border-tech-border/40">
+                          <div>
+                            <p className="text-xs text-gray-400 mb-1">采购计划编号</p>
+                            <p className="font-mono text-white text-lg font-bold">{plan.id.toUpperCase()}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-gray-400 mb-1">当前状态</p>
+                            <p className={cn('font-semibold', cfg.cls)}>{cfg.text}</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-3 mb-4 text-xs">
+                          <div>
+                            <p className="text-gray-500 mb-0.5">管片规格</p>
+                            <p className="text-white font-medium">{plan.spec}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500 mb-0.5">采购数量</p>
+                            <p className="text-white font-medium">{plan.quantity} 片</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500 mb-0.5">创建时间</p>
+                            <p className="text-white font-mono">{plan.createTime}</p>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-400 mb-2">三级审批流</p>
+                        <Timeline
+                          items={plan.approvals.map((a, i) => {
+                            const isPending = a.status === 'pending';
+                            const isApproved = a.status === 'approved';
+                            const isRejected = a.status === 'rejected';
+                            return {
+                              color: isApproved ? '#52C41A' : isRejected ? '#FF4D4F' : '#8C8C8C',
+                              dot: isApproved ? <CheckCircle className="w-4 h-4" /> : isRejected ? <XCircle className="w-4 h-4" /> : <Clock className="w-4 h-4" />,
+                              children: (
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className={cn('text-xs font-medium', isApproved && 'text-tech-green', isRejected && 'text-tech-red', isPending && 'text-gray-400')}>
+                                      {a.role} · {a.user}
+                                    </span>
+                                    <span className="text-[10px] text-gray-500 font-mono">{a.time || '等待处理'}</span>
+                                  </div>
+                                  <p className={cn('text-xs', isApproved && 'text-tech-green', isRejected && 'text-tech-red', isPending && 'text-gray-500')}>
+                                    {isPending ? '等待审批...' : isApproved ? '审批通过' : `驳回：${a.opinion}`}
+                                  </p>
+                                </div>
+                              ),
+                            };
+                          })}
+                        />
+                      </div>
+                    );
+                  })()}
+
+                  {selectedEvent.relatedType === 'maintenanceOrder' && (() => {
+                    const order = maintenanceOrders.find((o) => o.id === selectedEvent.relatedId);
+                    if (!order) return <p className="text-xs text-gray-500 text-center py-6">未找到对应的保养工单</p>;
+                    const statusText: Record<string, { text: string; cls: string }> = {
+                      pending: { text: '待处理', cls: 'text-tech-orange' },
+                      inProgress: { text: '处理中', cls: 'text-tech-blue' },
+                      completed: { text: '已完成', cls: 'text-tech-green' },
+                    };
+                    const st = statusText[order.status];
+                    return (
+                      <div>
+                        <div className="flex items-center justify-between mb-4 pb-3 border-b border-tech-border/40">
+                          <div>
+                            <p className="text-xs text-gray-400 mb-1">工单编号</p>
+                            <p className="font-mono text-white text-lg font-bold">{order.id.toUpperCase()}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-gray-400 mb-1">当前状态</p>
+                            <p className={cn('font-semibold', st.cls)}>{st.text}</p>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 mb-4 text-xs">
+                          <div>
+                            <p className="text-gray-500 mb-0.5">工单类型</p>
+                            <p className="text-white font-medium">{order.type}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500 mb-0.5">触发环数</p>
+                            <p className="text-white font-mono">{order.triggerRings} 环</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500 mb-0.5">关联盾构机</p>
+                            <p className="text-white font-medium">{order.shieldName}</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500 mb-0.5">处理人</p>
+                            <p className="text-white font-medium">{order.handler || '-'}</p>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-400 mb-2">工单状态流转</p>
+                        <Timeline
+                          items={[
+                            {
+                              color: '#52C41A',
+                              dot: <CheckCircle className="w-4 h-4" />,
+                              children: (
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-xs font-medium text-tech-green">工单创建</span>
+                                    <span className="text-[10px] text-gray-500 font-mono">{order.createTime}</span>
+                                  </div>
+                                  <p className="text-xs text-gray-400">系统根据阈值自动生成</p>
+                                </div>
+                              ),
+                            },
+                            ...(order.status !== 'pending' ? [{
+                              color: '#1890FF',
+                              dot: <Wrench className="w-4 h-4" />,
+                              children: (
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-xs font-medium text-tech-blue">开始处理</span>
+                                    <span className="text-[10px] text-gray-500 font-mono">-</span>
+                                  </div>
+                                  <p className="text-xs text-gray-400">处理人：{order.handler || '-'}</p>
+                                </div>
+                              ),
+                            }] : []),
+                            ...(order.status === 'completed' ? [{
+                              color: '#52C41A',
+                              dot: <CheckCircle className="w-4 h-4" />,
+                              children: (
+                                <div>
+                                  <div className="flex items-center justify-between mb-1">
+                                    <span className="text-xs font-medium text-tech-green">工单完成</span>
+                                    <span className="text-[10px] text-gray-500 font-mono">-</span>
+                                  </div>
+                                  <p className="text-xs text-gray-400">所有保养项已完成</p>
+                                </div>
+                              ),
+                            }] : []),
+                          ]}
+                        />
+                      </div>
+                    );
+                  })()}
+
+                  {selectedEvent.relatedType === 'monitoringPoint' && (() => {
+                    const mp = monitoringPoints.find((m) => m.id === selectedEvent.relatedId);
+                    if (!mp) return <p className="text-xs text-gray-500 text-center py-6">未找到对应的监测点</p>;
+                    return (
+                      <div>
+                        <div className="flex items-center justify-between mb-4 pb-3 border-b border-tech-border/40">
+                          <div>
+                            <p className="text-xs text-gray-400 mb-1">监测点编号</p>
+                            <p className="font-mono text-white text-lg font-bold">{mp.code}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-gray-400 mb-1">当前状态</p>
+                            <span className={cn(
+                              'px-2 py-0.5 rounded-full text-xs font-semibold border',
+                              mp.status === 'danger' && 'bg-tech-red/10 text-tech-red border-tech-red/40',
+                              mp.status === 'warning' && 'bg-tech-orange/10 text-tech-orange border-tech-orange/40',
+                              mp.status === 'normal' && 'bg-tech-green/10 text-tech-green border-tech-green/40',
+                            )}>
+                              {mp.status === 'danger' ? '超限危险' : mp.status === 'warning' ? '接近预警' : '正常'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-3 gap-3 mb-4 text-xs">
+                          <div>
+                            <p className="text-gray-500 mb-0.5">当前沉降</p>
+                            <p className={cn('font-bold text-lg font-mono',
+                              mp.status === 'danger' && 'text-tech-red',
+                              mp.status === 'warning' && 'text-tech-orange',
+                              mp.status === 'normal' && 'text-tech-green',
+                            )}>
+                              {mp.currentValue.toFixed(1)} <span className="text-xs font-normal text-gray-400">mm</span>
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500 mb-0.5">预警阈值</p>
+                            <p className="text-white font-mono text-sm">{mp.warningThreshold} mm</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500 mb-0.5">超限阈值</p>
+                            <p className="text-tech-red font-mono text-sm font-bold">{mp.threshold} mm</p>
+                          </div>
+                        </div>
+                        <div className="bg-white/5 rounded-lg p-3 border border-tech-border/40 mb-3">
+                          <p className="text-xs text-tech-cyan mb-2 flex items-center gap-1">
+                            <Gauge className="w-3 h-3" /> 受影响盾构机（自动联动调整参数）
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {shields.map((shield) => (
+                              <div
+                                key={shield.id}
+                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-tech-blue/10 border border-tech-blue/30 cursor-pointer hover:bg-tech-blue/20 transition-colors"
+                                onClick={() => navigate(`/dashboard?shieldId=${shield.id}`)}
+                              >
+                                <Gauge className="w-3 h-3 text-tech-blue" />
+                                <span className="text-xs text-white">{shield.name}</span>
+                                <span className="text-[10px] text-tech-cyan font-mono">#{shield.code}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+
+                  {selectedEvent.relatedType === 'shield' && (() => {
+                    const shield = shields.find((s) => s.id === selectedEvent.relatedId);
+                    if (!shield) return <p className="text-xs text-gray-500 text-center py-6">未找到对应的盾构机</p>;
+                    return (
+                      <div>
+                        <div className="flex items-center justify-between mb-4 pb-3 border-b border-tech-border/40">
+                          <div>
+                            <p className="text-xs text-gray-400 mb-1">盾构机名称 / 编号</p>
+                            <p className="font-mono text-white text-lg font-bold">{shield.name} <span className="text-sm text-tech-cyan">#{shield.code}</span></p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-gray-400 mb-1">运行状态</p>
+                            <span className={cn(
+                              'px-2 py-0.5 rounded-full text-xs font-semibold border',
+                              shield.status === 'normal' && 'bg-tech-green/10 text-tech-green border-tech-green/40',
+                              shield.status === 'warning' && 'bg-tech-orange/10 text-tech-orange border-tech-orange/40',
+                              shield.status === 'danger' && 'bg-tech-red/10 text-tech-red border-tech-red/40',
+                            )}>
+                              {shield.status === 'normal' ? '正常掘进' : shield.status === 'warning' ? '参数调整中' : '故障停机'}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="grid grid-cols-4 gap-3 mb-4 text-xs">
+                          <div>
+                            <p className="text-gray-500 mb-0.5">推进速度</p>
+                            <p className="text-white font-mono">{shield.thrustSpeed} mm/min</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500 mb-0.5">刀盘扭矩</p>
+                            <p className="text-white font-mono">{shield.cutterTorque} kN·m</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500 mb-0.5">注浆压力</p>
+                            <p className="text-white font-mono">{shield.groutingPressure} bar</p>
+                          </div>
+                          <div>
+                            <p className="text-gray-500 mb-0.5">累计环数</p>
+                            <p className="text-tech-green font-mono font-semibold">{shield.totalRings}</p>
+                          </div>
+                        </div>
+                        <div className="bg-white/5 rounded-lg p-3 border border-tech-border/40">
+                          <p className="text-xs text-tech-cyan mb-2 flex items-center gap-1">
+                            <Activity className="w-3 h-3" /> 关联监测点（沉降预警联动）
+                          </p>
+                          <div className="flex flex-wrap gap-2">
+                            {monitoringPoints.filter((m) => m.status !== 'normal').slice(0, 4).map((mp) => (
+                              <div
+                                key={mp.id}
+                                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-tech-orange/10 border border-tech-orange/30 cursor-pointer hover:bg-tech-orange/20 transition-colors"
+                                onClick={() => navigate(`/dashboard?mpId=${mp.id}`)}
+                              >
+                                <span className={cn(
+                                  'w-2 h-2 rounded-full',
+                                  mp.status === 'danger' ? 'bg-tech-red' : 'bg-tech-orange',
+                                )} />
+                                <span className="text-xs text-white font-mono">{mp.code}</span>
+                                <span className={cn(
+                                  'text-[10px] font-bold font-mono',
+                                  mp.status === 'danger' ? 'text-tech-red' : 'text-tech-orange',
+                                )}>{mp.currentValue.toFixed(1)}mm</span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}

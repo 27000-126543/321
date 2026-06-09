@@ -48,6 +48,7 @@ export default function ExportReport() {
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs]>([dayjs().startOf('day'), dayjs().endOf('day')]);
   const [projectName, setProjectName] = useState('XX地铁1号线XX标项目');
   const [isPreview, setIsPreview] = useState(true);
+  const [eventDetailTab, setEventDetailTab] = useState<'approval' | 'workorder' | 'warning'>('approval');
 
   const handleModeChange = (mode: ReportMode) => {
     setReportMode(mode);
@@ -142,13 +143,15 @@ export default function ExportReport() {
   }, [monitoringPoints, totalDays, diffFromToday]);
 
   const filteredEventLogs = useMemo(() => {
-    const ratio = totalDays <= 1 ? 1 : Math.min(1.5, totalDays / 3);
-    const events = Math.max(0, Math.min(eventLogs.length, Math.floor(eventLogs.length * ratio - diffFromToday)));
-    return eventLogs.slice(0, events).map((log, idx) => {
-      const dayOffset = totalDays > 1 ? Math.floor((idx / Math.max(1, events - 1)) * (totalDays - 1)) : 0;
-      const hour = Math.max(0, 23 - Math.floor(idx / 2) % 24);
-      const minute = (idx * 7) % 60;
-      const displayTime = dayjs(rangeStart).add(dayOffset, 'day').hour(hour).minute(minute);
+    const matchedLogs = eventLogs.filter((log) => {
+      const eventTime = dayjs(log.time, 'YYYY-MM-DD HH:mm:ss');
+      if (!eventTime.isValid()) return false;
+      return !eventTime.isBefore(rangeStart) && !eventTime.isAfter(rangeEnd);
+    });
+    return matchedLogs.map((log, idx) => {
+      const eventTime = dayjs(log.time, 'YYYY-MM-DD HH:mm:ss');
+      const dayOffset = eventTime.isValid() ? Math.max(0, eventTime.diff(rangeStart, 'day')) : 0;
+      const displayTime = eventTime.isValid() ? eventTime : dayjs(rangeStart).hour(Math.max(0, 23 - (idx / 2) % 24));
       return {
         ...log,
         originalTime: log.time,
@@ -157,13 +160,16 @@ export default function ExportReport() {
         dayOffset,
       };
     });
-  }, [eventLogs, totalDays, diffFromToday, rangeStart]);
+  }, [eventLogs, rangeStart, rangeEnd]);
 
   const approvalEvents = useMemo(() =>
     filteredEventLogs.filter(e => e.type === '审批'),
   [filteredEventLogs]);
   const workOrderEvents = useMemo(() =>
     filteredEventLogs.filter(e => e.type === '工单'),
+  [filteredEventLogs]);
+  const warningEvents = useMemo(() =>
+    filteredEventLogs.filter(e => e.type === '预警'),
   [filteredEventLogs]);
 
   const eventStats = useMemo(() => {
@@ -186,19 +192,36 @@ export default function ExportReport() {
 
   const totalEvents = eventStats.reduce((sum, d) => sum + d.value, 0);
 
+  const objectEventSummary = useMemo(() => {
+    const types: Array<{ key: EventRelatedType | 'unknown'; label: string; icon: string }> = [
+      { key: 'shield', label: '盾构机', icon: '🛡️' },
+      { key: 'monitoringPoint', label: '监测点', icon: '📡' },
+      { key: 'purchasePlan', label: '采购计划', icon: '📋' },
+      { key: 'maintenanceOrder', label: '保养工单', icon: '🔧' },
+    ];
+    return types.map(({ key, label, icon }) => {
+      const list = filteredEventLogs.filter((e) => e.relatedType === key);
+      const pending = list.filter((e) => (e.handleStatus || 'closed') === 'pending').length;
+      const inProgress = list.filter((e) => (e.handleStatus || 'closed') === 'inProgress').length;
+      const closed = list.filter((e) => (e.handleStatus || 'closed') === 'closed').length;
+      return { key, label, icon, total: list.length, pending, inProgress, closed };
+    }).filter((s) => s.total > 0);
+  }, [filteredEventLogs]);
+
   const printTime = dayjs().format('YYYY-MM-DD HH:mm:ss');
   const exporter = currentUser?.username || '系统管理员';
-  const reportDateLabel = totalDays <= 1
+  const reportDateLabel = rangeStart.isSame(rangeEnd, 'day')
     ? rangeStart.format('YYYY年MM月DD日')
     : `${rangeStart.format('YYYY年MM月DD日')} 至 ${rangeEnd.format('YYYY年MM月DD日')}`;
-  const reportTitle = totalDays <= 1
+  const reportTitle = reportMode === 'daily'
     ? '施 工 日 报'
-    : totalDays <= 7 ? '施 工 周 报' : '施 工 月 报';
-  const reportFileName = totalDays <= 1
-    ? `施工日报_${rangeStart.format('YYYYMMDD')}.xlsx`
-    : totalDays <= 7
-      ? `施工周报_${rangeStart.format('YYYYMMDD')}_${rangeEnd.format('YYYYMMDD')}.xlsx`
-      : `施工月报_${rangeStart.format('YYYYMM')}.xlsx`;
+    : reportMode === 'weekly' ? '施 工 周 报' : '施 工 月 报';
+  const reportFileBase = reportMode === 'daily' ? '施工日报' : reportMode === 'weekly' ? '施工周报' : '施工月报';
+  const reportFileName = reportMode === 'daily'
+    ? `${reportFileBase}_${rangeStart.format('YYYYMMDD')}.xlsx`
+    : reportMode === 'weekly'
+      ? `${reportFileBase}_${rangeStart.format('YYYYMMDD')}_${rangeEnd.format('YYYYMMDD')}.xlsx`
+      : `${reportFileBase}_${rangeStart.format('YYYYMM')}.xlsx`;
 
   const handlePreview = () => {
     setIsPreview(true);
@@ -301,18 +324,21 @@ export default function ExportReport() {
       }
       XLSX.utils.book_append_sheet(wb, wsMonitor, '沉降记录');
 
-      const approvalHeaders = ['日期时间', '级别', '内容', '操作人'];
+      const approvalHeaders = ['日期时间', '级别', '事件内容', '关联采购计划', '处置状态', '操作人'];
       const approvalRows = approvalEvents.map((e) => [
         e.displayFullDate,
         e.level === 'info' ? '信息' : e.level === 'warning' ? '警告' : '危险',
         e.content,
+        e.relatedName || (e.relatedType === 'purchasePlan' ? e.relatedId?.toUpperCase() : '') || '-',
+        (e.handleStatus || 'closed') === 'pending' ? '待处理'
+          : (e.handleStatus || 'closed') === 'inProgress' ? '处理中' : '已关闭',
         e.operator || '-',
       ]);
       const approvalAoA = approvalRows.length > 0
         ? [approvalHeaders, ...approvalRows]
-        : [approvalHeaders, ['-', '-', '期间无审批事件', '-']];
+        : [approvalHeaders, ['-', '-', '期间无审批事件', '-', '-', '-']];
       const wsApproval = XLSX.utils.aoa_to_sheet(approvalAoA);
-      wsApproval['!cols'] = [{ wch: 20 }, { wch: 8 }, { wch: 50 }, { wch: 14 }];
+      wsApproval['!cols'] = [{ wch: 20 }, { wch: 8 }, { wch: 50 }, { wch: 18 }, { wch: 10 }, { wch: 14 }];
       const approvalRange = XLSX.utils.decode_range(wsApproval['!ref'] || 'A1');
       for (let c = approvalRange.s.c; c <= approvalRange.e.c; c++) {
         const addr = XLSX.utils.encode_cell({ r: 0, c });
@@ -324,20 +350,23 @@ export default function ExportReport() {
           };
         }
       }
-      XLSX.utils.book_append_sheet(wb, wsApproval, '审批事件');
+      XLSX.utils.book_append_sheet(wb, wsApproval, '审批事件明细');
 
-      const woHeaders = ['日期时间', '级别', '内容', '操作人'];
+      const woHeaders = ['日期时间', '级别', '事件内容', '关联工单编号', '处置状态', '操作人'];
       const woRows = workOrderEvents.map((e) => [
         e.displayFullDate,
         e.level === 'info' ? '信息' : e.level === 'warning' ? '警告' : '危险',
         e.content,
+        e.relatedName || (e.relatedType === 'maintenanceOrder' ? e.relatedId?.toUpperCase() : '') || '-',
+        (e.handleStatus || 'closed') === 'pending' ? '待处理'
+          : (e.handleStatus || 'closed') === 'inProgress' ? '处理中' : '已关闭',
         e.operator || '-',
       ]);
       const woAoA = woRows.length > 0
         ? [woHeaders, ...woRows]
-        : [woHeaders, ['-', '-', '期间无工单事件', '-']];
+        : [woHeaders, ['-', '-', '期间无工单事件', '-', '-', '-']];
       const wsWo = XLSX.utils.aoa_to_sheet(woAoA);
-      wsWo['!cols'] = [{ wch: 20 }, { wch: 8 }, { wch: 50 }, { wch: 14 }];
+      wsWo['!cols'] = [{ wch: 20 }, { wch: 8 }, { wch: 50 }, { wch: 18 }, { wch: 10 }, { wch: 14 }];
       const woRange = XLSX.utils.decode_range(wsWo['!ref'] || 'A1');
       for (let c = woRange.s.c; c <= woRange.e.c; c++) {
         const addr = XLSX.utils.encode_cell({ r: 0, c });
@@ -349,30 +378,66 @@ export default function ExportReport() {
           };
         }
       }
-      XLSX.utils.book_append_sheet(wb, wsWo, '工单事件');
+      XLSX.utils.book_append_sheet(wb, wsWo, '工单事件明细');
 
-      const eventHeaders = ['日期时间', '类型', '级别', '内容', '操作人'];
+      const warnHeaders = ['日期时间', '级别', '事件内容', '关联监测点', '处置状态', '操作人'];
+      const warnRows = warningEvents.map((e) => [
+        e.displayFullDate,
+        e.level === 'info' ? '信息' : e.level === 'warning' ? '警告' : '危险',
+        e.content,
+        e.relatedName || (e.relatedType === 'monitoringPoint' ? e.relatedId : '') || e.relatedName || '-',
+        (e.handleStatus || 'closed') === 'pending' ? '待处理'
+          : (e.handleStatus || 'closed') === 'inProgress' ? '处理中' : '已关闭',
+        e.operator || '-',
+      ]);
+      const warnAoA = warnRows.length > 0
+        ? [warnHeaders, ...warnRows]
+        : [warnHeaders, ['-', '-', '期间无沉降预警', '-', '-', '-']];
+      const wsWarn = XLSX.utils.aoa_to_sheet(warnAoA);
+      wsWarn['!cols'] = [{ wch: 20 }, { wch: 8 }, { wch: 50 }, { wch: 18 }, { wch: 10 }, { wch: 14 }];
+      const warnRange = XLSX.utils.decode_range(wsWarn['!ref'] || 'A1');
+      for (let c = warnRange.s.c; c <= warnRange.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r: 0, c });
+        if (wsWarn[addr]) {
+          wsWarn[addr].s = {
+            font: { bold: true, color: { rgb: 'FFFFFF' } },
+            fill: { fgColor: { rgb: 'F5222D' } },
+            alignment: { horizontal: 'center', vertical: 'center' },
+          };
+        }
+      }
+      XLSX.utils.book_append_sheet(wb, wsWarn, '沉降预警明细');
+
+      const eventHeaders = ['日期时间', '类型', '级别', '内容', '关联对象', '处置状态', '操作人'];
       const eventRows = filteredEventLogs.map((e) => [
         e.displayFullDate,
         e.type,
         e.level === 'info' ? '信息' : e.level === 'warning' ? '警告' : '危险',
         e.content,
+        e.relatedType
+          ? `${e.relatedType === 'purchasePlan' ? '采购计划'
+              : e.relatedType === 'maintenanceOrder' ? '保养工单'
+              : e.relatedType === 'monitoringPoint' ? '监测点'
+              : e.relatedType === 'shield' ? '盾构机' : '其他'}${e.relatedName ? '：' + e.relatedName : ''}`
+          : '-',
+        (e.handleStatus || 'closed') === 'pending' ? '待处理'
+          : (e.handleStatus || 'closed') === 'inProgress' ? '处理中' : '已关闭',
         e.operator || '-',
       ]);
       const statsRows = [
-        ['', '', '', '', ''],
+        ['', '', '', '', '', '', ''],
         ['事件统计汇总'],
-        ['类型', '数量', '占比'],
+        ['类型', '数量', '占比', '', '', '', ''],
         ...eventTypeList.map((t) => {
           const count = filteredEventLogs.filter(e => e.type === t).length;
           const pct = totalEvents > 0 ? `${((count / totalEvents) * 100).toFixed(1)}%` : '0%';
-          return [t, count, pct];
+          return [t, count, pct, '', '', '', ''];
         }),
-        ['合计', totalEvents, '100%'],
+        ['合计', totalEvents, '100%', '', '', '', ''],
       ];
       const eventAoA = [eventHeaders, ...eventRows, ...statsRows];
       const wsEvent = XLSX.utils.aoa_to_sheet(eventAoA);
-      wsEvent['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 50 }, { wch: 14 }];
+      wsEvent['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 50 }, { wch: 22 }, { wch: 10 }, { wch: 14 }];
       const eventRange = XLSX.utils.decode_range(wsEvent['!ref'] || 'A1');
       for (let c = eventRange.s.c; c <= eventRange.e.c; c++) {
         const addr = XLSX.utils.encode_cell({ r: 0, c });
@@ -403,6 +468,59 @@ export default function ExportReport() {
         }
       }
       XLSX.utils.book_append_sheet(wb, wsEvent, '全事件统计');
+
+      const objSummaryHeaders = ['对象类型', '事件总数', '待处理', '处理中', '已关闭', '待处理占比'];
+      const objSummaryRows = objectEventSummary.length > 0
+        ? objectEventSummary.map((o) => [
+            o.label,
+            o.total,
+            o.pending,
+            o.inProgress,
+            o.closed,
+            o.total > 0 ? `${((o.pending / o.total) * 100).toFixed(1)}%` : '0%',
+          ])
+        : [['-', '0', '0', '0', '0', '0%']];
+      const objTotal = objectEventSummary.reduce((s, o) => s + o.total, 0);
+      const objPendingTotal = objectEventSummary.reduce((s, o) => s + o.pending, 0);
+      const objInProgressTotal = objectEventSummary.reduce((s, o) => s + o.inProgress, 0);
+      const objClosedTotal = objectEventSummary.reduce((s, o) => s + o.closed, 0);
+      const objAoA = [
+        objSummaryHeaders,
+        ...objSummaryRows,
+        ['合计', objTotal, objPendingTotal, objInProgressTotal, objClosedTotal,
+          objTotal > 0 ? `${((objPendingTotal / objTotal) * 100).toFixed(1)}%` : '0%'],
+      ];
+      const wsObj = XLSX.utils.aoa_to_sheet(objAoA);
+      wsObj['!cols'] = [{ wch: 16 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }, { wch: 12 }];
+      const objRange = XLSX.utils.decode_range(wsObj['!ref'] || 'A1');
+      for (let c = objRange.s.c; c <= objRange.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r: 0, c });
+        if (wsObj[addr]) {
+          wsObj[addr].s = {
+            font: { bold: true, color: { rgb: 'FFFFFF' } },
+            fill: { fgColor: { rgb: '722ED1' } },
+            alignment: { horizontal: 'center', vertical: 'center' },
+          };
+        }
+      }
+      const totalRow = objRange.e.r;
+      for (let c = objRange.s.c; c <= objRange.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r: totalRow, c });
+        if (wsObj[addr]) {
+          wsObj[addr].s = {
+            font: { bold: true, color: { rgb: 'FFFFFF' } },
+            fill: { fgColor: { rgb: '1890FF' } },
+            alignment: { horizontal: 'center' },
+          };
+        }
+      }
+      for (let r = 1; r < totalRow; r++) {
+        const pendingCell = XLSX.utils.encode_cell({ r, c: 2 });
+        if (wsObj[pendingCell] && Number(wsObj[pendingCell].v) > 0) {
+          wsObj[pendingCell].s = { font: { bold: true, color: { rgb: 'FA8C16' } }, alignment: { horizontal: 'center' } };
+        }
+      }
+      XLSX.utils.book_append_sheet(wb, wsObj, '对象事件汇总');
 
       XLSX.writeFile(wb, reportFileName);
       message.success(`报表导出成功：${reportFileName}`);
@@ -460,7 +578,7 @@ export default function ExportReport() {
           <div className="flex items-center px-2 py-1 rounded-lg bg-white/5 border border-tech-border/40">
             <Segmented<ReportMode>
               value={reportMode}
-              onChange={setReportMode}
+              onChange={handleModeChange}
               options={[
                 { label: (
                   <div className="flex items-center gap-1 px-1">
@@ -483,21 +601,15 @@ export default function ExportReport() {
 
           <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 border border-tech-border/40">
             <Calendar className="w-4 h-4 text-tech-blue" />
-            {reportMode === 'daily' ? (
-              <DatePicker
-                value={singleDate}
-                onChange={(date) => date && setSingleDate(date)}
-                format="YYYY-MM-DD"
-                className="!bg-transparent !border-none !text-white !w-32"
-                style={{ background: 'transparent', color: '#fff' }}
-                allowClear={false}
-              />
-            ) : (
-              <div className="text-sm text-white font-mono w-56">
-                {rangeStart.format('YYYY-MM-DD')} ~ {rangeEnd.format('YYYY-MM-DD')}
-                <span className="text-xs text-gray-400 ml-2">（共{totalDays}天）</span>
-              </div>
-            )}
+            <RangePicker
+              value={dateRange}
+              onChange={(val) => val && val[0] && val[1] && setDateRange([val[0], val[1]])}
+              format="YYYY-MM-DD"
+              allowClear={false}
+              className="!bg-transparent !border-none !text-white"
+              style={{ background: 'transparent', color: '#fff' }}
+            />
+            <span className="text-xs text-gray-400">（共{totalDays}天）</span>
           </div>
 
           <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 border border-tech-border/40 w-72">
@@ -794,57 +906,87 @@ export default function ExportReport() {
                 transition={{ delay: 0.55 }}
                 className="mb-8"
               >
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-1 h-4 bg-tech-blue rounded-full" />
-                      <h3 className="font-semibold text-gray-700">
-                        审批事件
-                        {totalDays > 1 && <span className="text-xs text-gray-400 ml-1 font-normal">（{totalDays}天）</span>}
-                      </h3>
-                      <span className="ml-auto text-xs text-tech-blue font-mono">{approvalEvents.length} 条</span>
-                    </div>
-                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                      {approvalEvents.length === 0 ? (
-                        <p className="text-xs text-gray-400 text-center py-4">期间无审批事件</p>
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-1 h-6 bg-tech-cyan rounded-full" />
+                  <h2 className="text-xl font-bold text-gray-800">
+                    事件明细分析
+                    {totalDays > 1 && <span className="text-sm text-gray-400 ml-2 font-normal">（{totalDays}天汇总）</span>}
+                  </h2>
+                  <div className="flex-1 h-px bg-gray-200 ml-2" />
+                  <Tabs
+                    value={eventDetailTab}
+                    onChange={setEventDetailTab}
+                    items={[
+                      { key: 'approval', label: `审批事件 (${approvalEvents.length})` },
+                      { key: 'workorder', label: `工单事件 (${workOrderEvents.length})` },
+                      { key: 'warning', label: `沉降预警 (${warningEvents.length})` },
+                    ]}
+                  />
+                </div>
+                <div className="border border-gray-200 rounded-lg overflow-hidden bg-white">
+                  <table className="w-full text-sm">
+                    <thead className="bg-gradient-to-r from-gray-50 to-gray-100">
+                      <tr>
+                        <th className="px-4 py-2.5 text-left font-semibold text-gray-700 border-b border-gray-200">发生时间</th>
+                        <th className="px-4 py-2.5 text-left font-semibold text-gray-700 border-b border-gray-200">级别</th>
+                        <th className="px-4 py-2.5 text-left font-semibold text-gray-700 border-b border-gray-200">事件内容</th>
+                        <th className="px-4 py-2.5 text-left font-semibold text-gray-700 border-b border-gray-200">关联对象</th>
+                        <th className="px-4 py-2.5 text-left font-semibold text-gray-700 border-b border-gray-200">处置状态</th>
+                        <th className="px-4 py-2.5 text-left font-semibold text-gray-700 border-b border-gray-200">操作人</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(eventDetailTab === 'approval' ? approvalEvents
+                        : eventDetailTab === 'workorder' ? workOrderEvents
+                        : warningEvents).length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="px-4 py-10 text-center text-gray-400 text-xs">
+                            期间无{eventDetailTab === 'approval' ? '审批' : eventDetailTab === 'workorder' ? '工单' : '沉降预警'}事件
+                          </td>
+                        </tr>
                       ) : (
-                        approvalEvents.slice(0, 8).map((e) => (
-                          <div key={e.id} className="p-2 rounded bg-blue-50/50 text-xs">
-                            <div className="flex items-center justify-between mb-0.5">
-                              <span className="text-tech-blue font-medium">{e.displayFullDate}</span>
-                              <span className="text-gray-400">{e.operator || '-'}</span>
-                            </div>
-                            <p className="text-gray-600">{e.content}</p>
-                          </div>
-                        ))
+                        (eventDetailTab === 'approval' ? approvalEvents
+                          : eventDetailTab === 'workorder' ? workOrderEvents
+                          : warningEvents).map((e) => {
+                          const lvlText = e.level === 'info' ? '信息' : e.level === 'warning' ? '警告' : '危险';
+                          const lvlCls = e.level === 'info' ? 'bg-blue-100 text-blue-700'
+                            : e.level === 'warning' ? 'bg-orange-100 text-orange-700' : 'bg-red-100 text-red-700';
+                          const hs = e.handleStatus || 'closed';
+                          const hsText = hs === 'pending' ? '待处理' : hs === 'inProgress' ? '处理中' : '已关闭';
+                          const hsCls = hs === 'pending' ? 'bg-tech-orange/10 text-tech-orange border-tech-orange/40'
+                            : hs === 'inProgress' ? 'bg-tech-blue/10 text-tech-blue border-tech-blue/40'
+                            : 'bg-tech-green/10 text-tech-green border-tech-green/40';
+                          return (
+                            <tr key={e.id} className="hover:bg-gray-50/60 transition-colors">
+                              <td className="px-4 py-2.5 border-b border-gray-100 font-mono text-xs text-gray-600">{e.displayFullDate}</td>
+                              <td className="px-4 py-2.5 border-b border-gray-100">
+                                <span className={cn('px-2 py-0.5 rounded-full text-[11px] font-semibold', lvlCls)}>{lvlText}</span>
+                              </td>
+                              <td className="px-4 py-2.5 border-b border-gray-100 text-gray-700">{e.content}</td>
+                              <td className="px-4 py-2.5 border-b border-gray-100">
+                                {e.relatedType ? (
+                                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-white border border-gray-200 text-[11px] text-gray-700">
+                                    <span>{e.relatedType === 'purchasePlan' ? '📋' : e.relatedType === 'maintenanceOrder' ? '🔧' : e.relatedType === 'monitoringPoint' ? '📡' : '🛡️'}</span>
+                                    <span className="font-medium">
+                                      {e.relatedType === 'purchasePlan' ? '采购计划'
+                                        : e.relatedType === 'maintenanceOrder' ? '保养工单'
+                                        : e.relatedType === 'monitoringPoint' ? '监测点'
+                                        : e.relatedType === 'shield' ? '盾构机' : '其他'}
+                                    </span>
+                                    {e.relatedName && <span className="font-mono text-tech-blue ml-1">{e.relatedName}</span>}
+                                  </span>
+                                ) : <span className="text-gray-400 text-[11px]">-</span>}
+                              </td>
+                              <td className="px-4 py-2.5 border-b border-gray-100">
+                                <span className={cn('px-2 py-0.5 rounded-full text-[11px] font-semibold border', hsCls)}>{hsText}</span>
+                              </td>
+                              <td className="px-4 py-2.5 border-b border-gray-100 text-gray-600 text-xs">{e.operator || '-'}</td>
+                            </tr>
+                          );
+                        })
                       )}
-                    </div>
-                  </div>
-                  <div className="border border-gray-200 rounded-lg p-4">
-                    <div className="flex items-center gap-2 mb-3">
-                      <div className="w-1 h-4 bg-tech-orange rounded-full" />
-                      <h3 className="font-semibold text-gray-700">
-                        工单事件
-                        {totalDays > 1 && <span className="text-xs text-gray-400 ml-1 font-normal">（{totalDays}天）</span>}
-                      </h3>
-                      <span className="ml-auto text-xs text-tech-orange font-mono">{workOrderEvents.length} 条</span>
-                    </div>
-                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
-                      {workOrderEvents.length === 0 ? (
-                        <p className="text-xs text-gray-400 text-center py-4">期间无工单事件</p>
-                      ) : (
-                        workOrderEvents.slice(0, 8).map((e) => (
-                          <div key={e.id} className="p-2 rounded bg-orange-50/50 text-xs">
-                            <div className="flex items-center justify-between mb-0.5">
-                              <span className="text-tech-orange font-medium">{e.displayFullDate}</span>
-                              <span className="text-gray-400">{e.operator || '-'}</span>
-                            </div>
-                            <p className="text-gray-600">{e.content}</p>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </div>
+                    </tbody>
+                  </table>
                 </div>
               </motion.section>
 
@@ -987,6 +1129,81 @@ export default function ExportReport() {
                     )}
                   </div>
                 </div>
+              </motion.section>
+
+              <motion.section
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.65 }}
+                className="mb-4"
+              >
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="w-1 h-6 bg-tech-purple rounded-full" />
+                  <h2 className="text-xl font-bold text-gray-800">
+                    事件按对象汇总
+                    {totalDays > 1 && <span className="text-sm text-gray-400 ml-2 font-normal">（{totalDays}天汇总）</span>}
+                  </h2>
+                  <div className="flex-1 h-px bg-gray-200 ml-2" />
+                  <span className="text-xs text-gray-400">
+                    {objectEventSummary.reduce((s, o) => s + o.total, 0)} 条事件 / {objectEventSummary.length} 类对象
+                  </span>
+                </div>
+                {objectEventSummary.length === 0 ? (
+                  <div className="border border-gray-200 rounded-lg p-10 text-center text-gray-400 text-xs bg-white">
+                    期间无对象关联事件
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-4 gap-4">
+                    {objectEventSummary.map((obj) => (
+                      <div
+                        key={obj.key}
+                        className="border border-gray-200 rounded-lg p-4 bg-gradient-to-br from-white to-gray-50 hover:shadow-md transition-shadow"
+                      >
+                        <div className="flex items-center justify-between mb-3">
+                          <div className="flex items-center gap-2">
+                            <span className="text-2xl">{obj.icon}</span>
+                            <span className="font-semibold text-gray-700">{obj.label}</span>
+                          </div>
+                          <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-tech-purple/10 text-tech-purple border border-tech-purple/30">
+                            {obj.total} 条
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 text-center">
+                          <div className="p-1.5 rounded-md bg-tech-orange/5 border border-tech-orange/20">
+                            <div className="text-lg font-bold text-tech-orange">{obj.pending}</div>
+                            <div className="text-[10px] text-gray-500">待处理</div>
+                          </div>
+                          <div className="p-1.5 rounded-md bg-tech-blue/5 border border-tech-blue/20">
+                            <div className="text-lg font-bold text-tech-blue">{obj.inProgress}</div>
+                            <div className="text-[10px] text-gray-500">处理中</div>
+                          </div>
+                          <div className="p-1.5 rounded-md bg-tech-green/5 border border-tech-green/20">
+                            <div className="text-lg font-bold text-tech-green">{obj.closed}</div>
+                            <div className="text-[10px] text-gray-500">已关闭</div>
+                          </div>
+                        </div>
+                        {obj.total > 0 && (
+                          <div className="mt-3 pt-2 border-t border-gray-100">
+                            <div className="flex gap-0.5 h-1.5 rounded-full overflow-hidden bg-gray-100">
+                              <div
+                                className="bg-tech-orange h-full transition-all"
+                                style={{ width: `${obj.total > 0 ? (obj.pending / obj.total) * 100 : 0}%` }}
+                              />
+                              <div
+                                className="bg-tech-blue h-full transition-all"
+                                style={{ width: `${obj.total > 0 ? (obj.inProgress / obj.total) * 100 : 0}%` }}
+                              />
+                              <div
+                                className="bg-tech-green h-full transition-all"
+                                style={{ width: `${obj.total > 0 ? (obj.closed / obj.total) * 100 : 0}%` }}
+                              />
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
               </motion.section>
             </div>
           </div>
