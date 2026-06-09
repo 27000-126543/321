@@ -116,6 +116,16 @@ export interface MaintenanceOrder {
 
 export type EventType = '预警' | '审批' | '工单' | '应急' | '进度';
 export type EventLevel = 'info' | 'warning' | 'danger';
+export type EventHandleStatus = 'pending' | 'inProgress' | 'closed';
+export type EventRelatedType = 'purchasePlan' | 'maintenanceOrder' | 'shield' | 'monitoringPoint' | 'worker' | 'emergency';
+
+export interface EventHandleRecord {
+  id: string;
+  status: EventHandleStatus;
+  handler: string;
+  time: string;
+  remark?: string;
+}
 
 export interface EventLog {
   id: string;
@@ -124,7 +134,14 @@ export interface EventLog {
   level: EventLevel;
   content: string;
   operator?: string;
+  handleStatus?: EventHandleStatus;
+  handleRecords?: EventHandleRecord[];
+  relatedType?: EventRelatedType;
+  relatedId?: string;
+  relatedName?: string;
 }
+
+export type ReportMode = 'daily' | 'weekly' | 'monthly';
 
 export type EmergencyType = '涌水' | '坍塌' | '火灾' | '有害气体';
 

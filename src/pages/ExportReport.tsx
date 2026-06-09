@@ -1,15 +1,15 @@
 import React, { useState, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { FileDown, Eye, Printer, Calendar, Building2, User, PieChart as PieChartIcon, List, ArrowLeft, LogOut } from 'lucide-react';
+import { FileDown, Eye, Printer, Calendar, Building2, User, PieChart as PieChartIcon, List, ArrowLeft, LogOut, BarChart3 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { DatePicker, Input, message } from 'antd';
+import { DatePicker, Input, message, Segmented } from 'antd';
 import type { Dayjs } from 'dayjs';
 import dayjs from 'dayjs';
 import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import * as XLSX from 'xlsx';
 import useStore from '@/store/useStore';
 import { cn } from '@/lib/utils';
-import type { EventType } from '@/types';
+import type { EventType, ReportMode } from '@/types';
 
 const HudCorners: React.FC<{ className?: string }> = ({ className = '' }) => (
   <>
@@ -30,14 +30,37 @@ const COLORS: Record<EventType, string> = {
 
 const eventTypeList: EventType[] = ['预警', '审批', '工单', '应急', '进度'];
 
+const MODE_LABEL: Record<ReportMode, string> = {
+  daily: '日报',
+  weekly: '周报',
+  monthly: '月报',
+};
+
+const DAILY_RINGS = 3;
+const WEEKLY_BASIS = 7;
+const MONTHLY_BASIS = 30;
+
 export default function ExportReport() {
   const navigate = useNavigate();
   const { shields, monitoringPoints, eventLogs, currentUser, logout } = useStore();
-  const [selectedDate, setSelectedDate] = useState<Dayjs>(dayjs());
+  const [reportMode, setReportMode] = useState<ReportMode>('daily');
+  const [singleDate, setSingleDate] = useState<Dayjs>(dayjs());
   const [projectName, setProjectName] = useState('XX地铁1号线XX标项目');
   const [isPreview, setIsPreview] = useState(true);
 
-  const diffDay = Math.max(0, dayjs().diff(selectedDate, 'day'));
+  const dateRange = useMemo<[Dayjs, Dayjs]>(() => {
+    if (reportMode === 'daily') {
+      return [singleDate.startOf('day'), singleDate.endOf('day')];
+    } else if (reportMode === 'weekly') {
+      return [singleDate.startOf('week').add(1, 'day'), singleDate.endOf('week').add(1, 'day')];
+    } else {
+      return [singleDate.startOf('month'), singleDate.endOf('month')];
+    }
+  }, [reportMode, singleDate]);
+
+  const [rangeStart, rangeEnd] = dateRange;
+  const totalDays = Math.max(1, rangeEnd.diff(rangeStart, 'day') + 1);
+  const diffFromToday = Math.max(0, dayjs().diff(rangeEnd, 'day'));
 
   const todayRingsData = useMemo(() => {
     return shields.map((shield) => {
@@ -46,67 +69,100 @@ export default function ExportReport() {
       const lastRings = history.length > 0 ? history[history.length - 1].rings : shield.totalRings;
       let todayRings = Math.max(0, lastRings - firstRings);
       let totalRings = shield.totalRings;
-      todayRings = Math.max(0, todayRings - diffDay * 3);
-      totalRings = Math.max(0, totalRings - diffDay * 3);
-      const speedOffset = diffDay * ((shield.id.charCodeAt(shield.id.length - 1) % 5) - 2) * 0.3;
+
+      todayRings = Math.max(0, todayRings * totalDays - diffFromToday * DAILY_RINGS);
+      totalRings = Math.max(0, totalRings - diffFromToday * DAILY_RINGS);
+
+      const speedOffset = ((shield.id.charCodeAt(shield.id.length - 1) % 5) - 2) * 0.3;
       const avgSpeed = history.length > 0
         ? Math.max(10, Number((history.reduce((sum, h) => sum + h.thrustSpeed, 0) / history.length + speedOffset).toFixed(1)))
         : Math.max(10, Number((shield.thrustSpeed + speedOffset).toFixed(1)));
-      const torqueOffset = diffDay * ((shield.id.charCodeAt(0) % 5) - 2) * 80;
+
+      const torqueOffset = ((shield.id.charCodeAt(0) % 5) - 2) * 80;
       const maxTorque = history.length > 0
         ? Math.max(2000, Math.min(6000, Math.max(...history.map((h) => h.cutterTorque)) + Math.floor(torqueOffset)))
         : Math.max(2000, Math.min(6000, shield.cutterTorque + Math.floor(torqueOffset)));
-      const runHours = 24;
+
+      const runHoursPerDay = 24;
       return {
         ...shield,
         todayRings,
         totalRings,
         avgSpeed,
         maxTorque,
-        runHours,
+        runHours: runHoursPerDay * totalDays,
+        ringPerDay: totalDays > 0 ? Number((todayRings / totalDays).toFixed(1)) : 0,
       };
     });
-  }, [shields, diffDay]);
+  }, [shields, totalDays, diffFromToday]);
 
   const monitoringDisplay = useMemo(() => {
     return monitoringPoints.map((point) => {
-      const offsetValue = Number((diffDay * 0.5 + (point.id.charCodeAt(point.id.length - 1) % 3) * 0.1).toFixed(1));
+      const offsetValue = Number((diffFromToday * 0.5 + (point.id.charCodeAt(point.id.length - 1) % 3) * 0.1).toFixed(1));
       const currentValue = Number(Math.max(0, point.currentValue - offsetValue).toFixed(1));
+
+      let maxValue: number;
+      let avgValue: number;
+      if (totalDays <= 1) {
+        maxValue = currentValue;
+        avgValue = currentValue;
+      } else {
+        const dailyMaxBump = Math.min(totalDays * 0.8, 8);
+        maxValue = Number(Math.min(currentValue + dailyMaxBump, point.threshold * 1.8).toFixed(1));
+        avgValue = Number((currentValue + (maxValue - currentValue) * 0.4).toFixed(1));
+      }
+
       const trendPrev = point.trend.length > 1 ? Math.max(0, point.trend[point.trend.length - 2] - offsetValue * 0.8) : currentValue;
       const change = Number((currentValue - trendPrev).toFixed(1));
-      const newStatus: 'normal' | 'warning' | 'danger' = currentValue >= point.threshold
+      const newStatus: 'normal' | 'warning' | 'danger' = maxValue >= point.threshold
         ? 'danger'
-        : currentValue >= point.warningThreshold
+        : maxValue >= point.warningThreshold
           ? 'warning'
           : 'normal';
       const statusText = newStatus === 'normal' ? '正常' : newStatus === 'warning' ? '预警' : '危险';
       const remark = newStatus === 'danger'
-        ? '超过阈值，需立即处理'
+        ? `${totalDays}日内峰值超阈值，需重点关注`
         : newStatus === 'warning'
-          ? '接近阈值，持续关注'
-          : '-';
+          ? `${totalDays}日内接近阈值，持续监测`
+          : `${totalDays}日数据平稳`;
+
       return {
         ...point,
         currentValue,
+        maxValue,
+        avgValue,
         change,
         status: newStatus,
         statusText,
         remark,
       };
     });
-  }, [monitoringPoints, diffDay]);
+  }, [monitoringPoints, totalDays, diffFromToday]);
 
   const filteredEventLogs = useMemo(() => {
-    const keepCount = Math.max(0, eventLogs.length - diffDay * 2);
-    return eventLogs.slice(0, keepCount).map((log) => {
-      const logTime = dayjs().subtract(diffDay, 'day').format('YYYY-MM-DD') + ' ' + log.time;
+    const ratio = totalDays <= 1 ? 1 : Math.min(1.5, totalDays / 3);
+    const events = Math.max(0, Math.min(eventLogs.length, Math.floor(eventLogs.length * ratio - diffFromToday)));
+    return eventLogs.slice(0, events).map((log, idx) => {
+      const dayOffset = totalDays > 1 ? Math.floor((idx / Math.max(1, events - 1)) * (totalDays - 1)) : 0;
+      const hour = Math.max(0, 23 - Math.floor(idx / 2) % 24);
+      const minute = (idx * 7) % 60;
+      const displayTime = dayjs(rangeStart).add(dayOffset, 'day').hour(hour).minute(minute);
       return {
         ...log,
         originalTime: log.time,
-        displayDate: dayjs(logTime, 'YYYY-MM-DD HH:mm:ss').format('HH:mm:ss'),
+        displayDate: displayTime.format('HH:mm:ss'),
+        displayFullDate: displayTime.format('YYYY-MM-DD HH:mm'),
+        dayOffset,
       };
     });
-  }, [eventLogs, diffDay]);
+  }, [eventLogs, totalDays, diffFromToday, rangeStart]);
+
+  const approvalEvents = useMemo(() =>
+    filteredEventLogs.filter(e => e.type === '审批'),
+  [filteredEventLogs]);
+  const workOrderEvents = useMemo(() =>
+    filteredEventLogs.filter(e => e.type === '工单'),
+  [filteredEventLogs]);
 
   const eventStats = useMemo(() => {
     const counts: Record<EventType, number> = {
@@ -130,33 +186,45 @@ export default function ExportReport() {
 
   const printTime = dayjs().format('YYYY-MM-DD HH:mm:ss');
   const exporter = currentUser?.username || '系统管理员';
-  const reportDate = selectedDate.format('YYYY年MM月DD日');
+  const reportDateLabel = totalDays <= 1
+    ? rangeStart.format('YYYY年MM月DD日')
+    : `${rangeStart.format('YYYY年MM月DD日')} 至 ${rangeEnd.format('YYYY年MM月DD日')}`;
+  const reportTitle = totalDays <= 1
+    ? '施 工 日 报'
+    : totalDays <= 7 ? '施 工 周 报' : '施 工 月 报';
+  const reportFileName = totalDays <= 1
+    ? `施工日报_${rangeStart.format('YYYYMMDD')}.xlsx`
+    : totalDays <= 7
+      ? `施工周报_${rangeStart.format('YYYYMMDD')}_${rangeEnd.format('YYYYMMDD')}.xlsx`
+      : `施工月报_${rangeStart.format('YYYYMM')}.xlsx`;
 
   const handlePreview = () => {
     setIsPreview(true);
-    message.success('报表预览已刷新');
+    message.success(`${MODE_LABEL[reportMode]}预览已刷新`);
   };
 
   const handleExportExcel = () => {
     try {
       const wb = XLSX.utils.book_new();
-      const dateStr = selectedDate.format('YYYYMMDD');
 
       const coverData = [
-        ['施工日报'],
+        [reportTitle],
         [],
         ['项目名称', projectName],
-        ['报告日期', reportDate],
+        ['报告期间', reportDateLabel],
+        ['报告类型', MODE_LABEL[reportMode]],
+        ['统计天数', `${totalDays} 天`],
         ['导出人', exporter],
         ['打印时间', printTime],
         [],
         ['报表摘要'],
         ['盾构机数量', todayRingsData.length],
-        ['当日掘进总环数', todayRingsData.reduce((s, r) => s + r.todayRings, 0)],
+        [`期间掘进总环数（${totalDays}天）`, todayRingsData.reduce((s, r) => s + r.todayRings, 0)],
+        ['日均环数', (todayRingsData.reduce((s, r) => s + r.ringPerDay, 0) / todayRingsData.length).toFixed(1)],
         ['监测点数量', monitoringDisplay.length],
         ['危险监测点', monitoringDisplay.filter(m => m.status === 'danger').length],
         ['预警监测点', monitoringDisplay.filter(m => m.status === 'warning').length],
-        ['今日事件总数', totalEvents],
+        [`${totalDays}天事件总数`, totalEvents],
       ];
       const wsCover = XLSX.utils.aoa_to_sheet(coverData);
       wsCover['!cols'] = [{ wch: 20 }, { wch: 40 }];
@@ -168,19 +236,19 @@ export default function ExportReport() {
       }
       XLSX.utils.book_append_sheet(wb, wsCover, '封面');
 
-      const shieldHeaders = ['盾构机编号', '名称', '当日掘进环数', '累计环数', '平均推进速度(mm/min)', '最大刀盘扭矩(kN·m)', '运行时长(h)'];
-      const shieldRows = todayRingsData.map((s) => [
-        s.code,
-        s.name,
-        s.todayRings,
-        s.totalRings,
-        s.avgSpeed,
-        s.maxTorque,
-        s.runHours,
-      ]);
+      const shieldHeaders = totalDays <= 1
+        ? ['盾构机编号', '名称', '当日掘进环数', '累计环数', '平均推进速度(mm/min)', '最大刀盘扭矩(kN·m)', '运行时长(h)']
+        : ['盾构机编号', '名称', '期间掘进环数', '日均环数', '累计环数', '平均推进速度(mm/min)', '最大刀盘扭矩(kN·m)', '运行总时长(h)'];
+      const shieldRows = todayRingsData.map((s) =>
+        totalDays <= 1
+          ? [s.code, s.name, s.todayRings, s.totalRings, s.avgSpeed, s.maxTorque, s.runHours]
+          : [s.code, s.name, s.todayRings, s.ringPerDay, s.totalRings, s.avgSpeed, s.maxTorque, s.runHours]
+      );
       const shieldAoA = [shieldHeaders, ...shieldRows];
       const wsShield = XLSX.utils.aoa_to_sheet(shieldAoA);
-      wsShield['!cols'] = [{ wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 20 }, { wch: 22 }, { wch: 12 }];
+      wsShield['!cols'] = totalDays <= 1
+        ? [{ wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 20 }, { wch: 22 }, { wch: 12 }]
+        : [{ wch: 16 }, { wch: 18 }, { wch: 14 }, { wch: 12 }, { wch: 12 }, { wch: 20 }, { wch: 22 }, { wch: 14 }];
       const headerRange = XLSX.utils.decode_range(wsShield['!ref'] || 'A1');
       for (let c = headerRange.s.c; c <= headerRange.e.c; c++) {
         const addr = XLSX.utils.encode_cell({ r: 0, c });
@@ -194,18 +262,17 @@ export default function ExportReport() {
       }
       XLSX.utils.book_append_sheet(wb, wsShield, '盾构统计');
 
-      const monitorHeaders = ['监测点编号', '沉降值(mm)', '阈值(mm)', '变化量(mm)', '状态', '备注'];
-      const monitorRows = monitoringDisplay.map((m) => [
-        m.code,
-        m.currentValue,
-        m.threshold,
-        m.change,
-        m.statusText,
-        m.remark,
-      ]);
+      const monitorHeaders = totalDays <= 1
+        ? ['监测点编号', '沉降值(mm)', '阈值(mm)', '变化量(mm)', '状态', '备注']
+        : ['监测点编号', '平均沉降(mm)', '峰值沉降(mm)', '阈值(mm)', '状态', '备注'];
+      const monitorRows = monitoringDisplay.map((m) =>
+        totalDays <= 1
+          ? [m.code, m.currentValue, m.threshold, m.change, m.statusText, m.remark]
+          : [m.code, m.avgValue, m.maxValue, m.threshold, m.statusText, m.remark]
+      );
       const monitorAoA = [monitorHeaders, ...monitorRows];
       const wsMonitor = XLSX.utils.aoa_to_sheet(monitorAoA);
-      wsMonitor['!cols'] = [{ wch: 16 }, { wch: 12 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 30 }];
+      wsMonitor['!cols'] = [{ wch: 16 }, { wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 8 }, { wch: 30 }];
       const monitorRange = XLSX.utils.decode_range(wsMonitor['!ref'] || 'A1');
       for (let c = monitorRange.s.c; c <= monitorRange.e.c; c++) {
         const addr = XLSX.utils.encode_cell({ r: 0, c });
@@ -218,7 +285,7 @@ export default function ExportReport() {
         }
       }
       for (let r = 1; r <= monitorRange.e.r; r++) {
-        const statusCell = XLSX.utils.encode_cell({ r, c: 4 });
+        const statusCell = XLSX.utils.encode_cell({ r, c: totalDays <= 1 ? 4 : 4 });
         if (wsMonitor[statusCell]) {
           const val = wsMonitor[statusCell].v;
           let color = '52C41A';
@@ -232,9 +299,59 @@ export default function ExportReport() {
       }
       XLSX.utils.book_append_sheet(wb, wsMonitor, '沉降记录');
 
-      const eventHeaders = ['时间', '类型', '级别', '内容', '操作人'];
+      const approvalHeaders = ['日期时间', '级别', '内容', '操作人'];
+      const approvalRows = approvalEvents.map((e) => [
+        e.displayFullDate,
+        e.level === 'info' ? '信息' : e.level === 'warning' ? '警告' : '危险',
+        e.content,
+        e.operator || '-',
+      ]);
+      const approvalAoA = approvalRows.length > 0
+        ? [approvalHeaders, ...approvalRows]
+        : [approvalHeaders, ['-', '-', '期间无审批事件', '-']];
+      const wsApproval = XLSX.utils.aoa_to_sheet(approvalAoA);
+      wsApproval['!cols'] = [{ wch: 20 }, { wch: 8 }, { wch: 50 }, { wch: 14 }];
+      const approvalRange = XLSX.utils.decode_range(wsApproval['!ref'] || 'A1');
+      for (let c = approvalRange.s.c; c <= approvalRange.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r: 0, c });
+        if (wsApproval[addr]) {
+          wsApproval[addr].s = {
+            font: { bold: true, color: { rgb: 'FFFFFF' } },
+            fill: { fgColor: { rgb: '1890FF' } },
+            alignment: { horizontal: 'center', vertical: 'center' },
+          };
+        }
+      }
+      XLSX.utils.book_append_sheet(wb, wsApproval, '审批事件');
+
+      const woHeaders = ['日期时间', '级别', '内容', '操作人'];
+      const woRows = workOrderEvents.map((e) => [
+        e.displayFullDate,
+        e.level === 'info' ? '信息' : e.level === 'warning' ? '警告' : '危险',
+        e.content,
+        e.operator || '-',
+      ]);
+      const woAoA = woRows.length > 0
+        ? [woHeaders, ...woRows]
+        : [woHeaders, ['-', '-', '期间无工单事件', '-']];
+      const wsWo = XLSX.utils.aoa_to_sheet(woAoA);
+      wsWo['!cols'] = [{ wch: 20 }, { wch: 8 }, { wch: 50 }, { wch: 14 }];
+      const woRange = XLSX.utils.decode_range(wsWo['!ref'] || 'A1');
+      for (let c = woRange.s.c; c <= woRange.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r: 0, c });
+        if (wsWo[addr]) {
+          wsWo[addr].s = {
+            font: { bold: true, color: { rgb: 'FFFFFF' } },
+            fill: { fgColor: { rgb: 'FA8C16' } },
+            alignment: { horizontal: 'center', vertical: 'center' },
+          };
+        }
+      }
+      XLSX.utils.book_append_sheet(wb, wsWo, '工单事件');
+
+      const eventHeaders = ['日期时间', '类型', '级别', '内容', '操作人'];
       const eventRows = filteredEventLogs.map((e) => [
-        e.displayDate,
+        e.displayFullDate,
         e.type,
         e.level === 'info' ? '信息' : e.level === 'warning' ? '警告' : '危险',
         e.content,
@@ -253,7 +370,7 @@ export default function ExportReport() {
       ];
       const eventAoA = [eventHeaders, ...eventRows, ...statsRows];
       const wsEvent = XLSX.utils.aoa_to_sheet(eventAoA);
-      wsEvent['!cols'] = [{ wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 50 }, { wch: 14 }];
+      wsEvent['!cols'] = [{ wch: 20 }, { wch: 10 }, { wch: 10 }, { wch: 50 }, { wch: 14 }];
       const eventRange = XLSX.utils.decode_range(wsEvent['!ref'] || 'A1');
       for (let c = eventRange.s.c; c <= eventRange.e.c; c++) {
         const addr = XLSX.utils.encode_cell({ r: 0, c });
@@ -283,11 +400,10 @@ export default function ExportReport() {
           };
         }
       }
-      XLSX.utils.book_append_sheet(wb, wsEvent, '事件统计');
+      XLSX.utils.book_append_sheet(wb, wsEvent, '全事件统计');
 
-      const fileName = `施工日报_${dateStr}.xlsx`;
-      XLSX.writeFile(wb, fileName);
-      message.success(`报表导出成功：${fileName}`);
+      XLSX.writeFile(wb, reportFileName);
+      message.success(`报表导出成功：${reportFileName}`);
     } catch {
       message.error('报表导出失败，请重试');
     }
@@ -333,22 +449,53 @@ export default function ExportReport() {
             <FileDown className="w-6 h-6 text-white" />
           </div>
           <div>
-            <h1 className="text-2xl font-bold tech-title tracking-wide">施工日报导出系统</h1>
-            <p className="text-xs text-gray-400 mt-0.5">Daily Construction Report Export</p>
+            <h1 className="text-2xl font-bold tech-title tracking-wide">施工报表导出系统</h1>
+            <p className="text-xs text-gray-400 mt-0.5">Construction Report Export System</p>
           </div>
         </div>
 
         <div className="flex items-center gap-4 z-10">
+          <div className="flex items-center px-2 py-1 rounded-lg bg-white/5 border border-tech-border/40">
+            <Segmented<ReportMode>
+              value={reportMode}
+              onChange={setReportMode}
+              options={[
+                { label: (
+                  <div className="flex items-center gap-1 px-1">
+                    <Calendar className="w-3.5 h-3.5" /> 日报
+                  </div>
+                ), value: 'daily' },
+                { label: (
+                  <div className="flex items-center gap-1 px-1">
+                    <BarChart3 className="w-3.5 h-3.5" /> 周报
+                  </div>
+                ), value: 'weekly' },
+                { label: (
+                  <div className="flex items-center gap-1 px-1">
+                    <List className="w-3.5 h-3.5" /> 月报
+                  </div>
+                ), value: 'monthly' },
+              ]}
+            />
+          </div>
+
           <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 border border-tech-border/40">
             <Calendar className="w-4 h-4 text-tech-blue" />
-            <DatePicker
-              value={selectedDate}
-              onChange={(date) => date && setSelectedDate(date)}
-              format="YYYY-MM-DD"
-              className="!bg-transparent !border-none !text-white !w-32"
-              style={{ background: 'transparent', color: '#fff' }}
-              allowClear={false}
-            />
+            {reportMode === 'daily' ? (
+              <DatePicker
+                value={singleDate}
+                onChange={(date) => date && setSingleDate(date)}
+                format="YYYY-MM-DD"
+                className="!bg-transparent !border-none !text-white !w-32"
+                style={{ background: 'transparent', color: '#fff' }}
+                allowClear={false}
+              />
+            ) : (
+              <div className="text-sm text-white font-mono w-56">
+                {rangeStart.format('YYYY-MM-DD')} ~ {rangeEnd.format('YYYY-MM-DD')}
+                <span className="text-xs text-gray-400 ml-2">（共{totalDays}天）</span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-2 px-4 py-2 rounded-lg bg-white/5 border border-tech-border/40 w-72">
@@ -428,9 +575,12 @@ export default function ExportReport() {
               >
                 <div className="text-center mb-6">
                   <h1 className="text-3xl font-bold text-tech-blue mb-2" style={{ fontFamily: "'PingFang SC', sans-serif" }}>
-                    施 工 日 报
+                    {reportTitle}
                   </h1>
                   <div className="w-32 h-1 bg-gradient-to-r from-transparent via-tech-blue to-transparent mx-auto rounded-full" />
+                  <div className="mt-3 inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-tech-blue/10 text-tech-blue text-xs font-medium">
+                    {MODE_LABEL[reportMode]} · {totalDays} 天
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-x-12 gap-y-3">
                   <div className="flex items-center gap-2">
@@ -440,8 +590,8 @@ export default function ExportReport() {
                   </div>
                   <div className="flex items-center gap-2">
                     <Calendar className="w-4 h-4 text-tech-blue flex-shrink-0" />
-                    <span className="text-gray-500 w-20">报告日期</span>
-                    <span className="text-gray-800 font-semibold">{reportDate}</span>
+                    <span className="text-gray-500 w-20">报告期间</span>
+                    <span className="text-gray-800 font-semibold">{reportDateLabel}</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <User className="w-4 h-4 text-tech-blue flex-shrink-0" />
@@ -464,20 +614,24 @@ export default function ExportReport() {
               >
                 <div className="flex items-center gap-2 mb-4">
                   <div className="w-1 h-6 bg-tech-blue rounded-full" />
-                  <h2 className="text-xl font-bold text-gray-800">盾构掘进统计</h2>
+                  <h2 className="text-xl font-bold text-gray-800">
+                    盾构掘进统计
+                    {totalDays > 1 && <span className="text-sm text-gray-400 ml-2 font-normal">（{totalDays}天汇总）</span>}
+                  </h2>
                   <div className="flex-1 h-px bg-gray-200 ml-2" />
-                  <span className="text-xs text-gray-400">共 {shields.length} 台盾构机</span>
+                  <span className="text-xs text-gray-400">共 {todayRingsData.length} 台盾构机</span>
                 </div>
                 <div className="overflow-hidden rounded-lg border border-gray-200">
                   <table className="w-full text-sm">
                     <thead>
                       <tr className="bg-tech-blue text-white">
                         <th className="px-4 py-3 font-semibold text-center">盾构机编号</th>
-                        <th className="px-4 py-3 font-semibold text-center">当日掘进环数</th>
+                        <th className="px-4 py-3 font-semibold text-center">{totalDays <= 1 ? '当日掘进环数' : '期间掘进环数'}</th>
+                        {totalDays > 1 && <th className="px-4 py-3 font-semibold text-center">日均环数</th>}
                         <th className="px-4 py-3 font-semibold text-center">累计环数</th>
                         <th className="px-4 py-3 font-semibold text-center">平均推进速度(mm/min)</th>
                         <th className="px-4 py-3 font-semibold text-center">最大刀盘扭矩(kN·m)</th>
-                        <th className="px-4 py-3 font-semibold text-center">运行时长(h)</th>
+                        <th className="px-4 py-3 font-semibold text-center">{totalDays <= 1 ? '运行时长(h)' : '总时长(h)'}</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -489,6 +643,7 @@ export default function ExportReport() {
                           <td className="px-4 py-3 text-center font-bold text-tech-blue border-t border-gray-100">
                             {shield.todayRings}
                           </td>
+                          {totalDays > 1 && <td className="px-4 py-3 text-center font-mono text-tech-cyan border-t border-gray-100">{shield.ringPerDay}</td>}
                           <td className="px-4 py-3 text-center font-mono text-gray-800 border-t border-gray-100">
                             {shield.totalRings}
                           </td>
@@ -510,6 +665,11 @@ export default function ExportReport() {
                         <td className="px-4 py-3 text-center text-tech-red border-t border-gray-200">
                           {todayRingsData.reduce((s, r) => s + r.todayRings, 0)}
                         </td>
+                        {totalDays > 1 && (
+                          <td className="px-4 py-3 text-center text-tech-cyan border-t border-gray-200">
+                            {(todayRingsData.reduce((s, r) => s + r.ringPerDay, 0) / todayRingsData.length).toFixed(1)}
+                          </td>
+                        )}
                         <td className="px-4 py-3 text-center text-gray-800 border-t border-gray-200">
                           {todayRingsData.reduce((s, r) => s + r.totalRings, 0)}
                         </td>
@@ -520,7 +680,7 @@ export default function ExportReport() {
                           {Math.max(...todayRingsData.map((r) => r.maxTorque))}
                         </td>
                         <td className="px-4 py-3 text-center text-gray-700 border-t border-gray-200">
-                          {todayRingsData.length * 24}
+                          {todayRingsData.reduce((s, r) => s + r.runHours, 0)}
                         </td>
                       </tr>
                     </tfoot>
@@ -536,7 +696,10 @@ export default function ExportReport() {
               >
                 <div className="flex items-center gap-2 mb-4">
                   <div className="w-1 h-6 bg-tech-cyan rounded-full" />
-                  <h2 className="text-xl font-bold text-gray-800">沉降监测记录</h2>
+                  <h2 className="text-xl font-bold text-gray-800">
+                    沉降监测记录
+                    {totalDays > 1 && <span className="text-sm text-gray-400 ml-2 font-normal">（{totalDays}天峰值/均值统计）</span>}
+                  </h2>
                   <div className="flex-1 h-px bg-gray-200 ml-2" />
                   <span className="text-xs text-gray-400">
                     共 {monitoringDisplay.length} 个监测点 ·
@@ -549,9 +712,19 @@ export default function ExportReport() {
                     <thead>
                       <tr className="bg-tech-cyan text-white">
                         <th className="px-4 py-3 font-semibold text-center">监测点编号</th>
-                        <th className="px-4 py-3 font-semibold text-center">沉降值(mm)</th>
-                        <th className="px-4 py-3 font-semibold text-center">阈值(mm)</th>
-                        <th className="px-4 py-3 font-semibold text-center">变化量(mm)</th>
+                        {totalDays <= 1 ? (
+                          <>
+                            <th className="px-4 py-3 font-semibold text-center">沉降值(mm)</th>
+                            <th className="px-4 py-3 font-semibold text-center">阈值(mm)</th>
+                            <th className="px-4 py-3 font-semibold text-center">变化量(mm)</th>
+                          </>
+                        ) : (
+                          <>
+                            <th className="px-4 py-3 font-semibold text-center">平均沉降(mm)</th>
+                            <th className="px-4 py-3 font-semibold text-center">峰值沉降(mm)</th>
+                            <th className="px-4 py-3 font-semibold text-center">阈值(mm)</th>
+                          </>
+                        )}
                         <th className="px-4 py-3 font-semibold text-center">状态</th>
                         <th className="px-4 py-3 font-semibold text-left">备注</th>
                       </tr>
@@ -562,23 +735,44 @@ export default function ExportReport() {
                           <td className="px-4 py-3 text-center font-mono font-semibold text-gray-700 border-t border-gray-100">
                             {point.code}
                           </td>
-                          <td className={cn(
-                            'px-4 py-3 text-center font-mono font-bold border-t border-gray-100',
-                            point.status === 'danger' && 'text-tech-red',
-                            point.status === 'warning' && 'text-tech-orange',
-                            point.status === 'normal' && 'text-gray-700',
-                          )}>
-                            {point.currentValue}
-                          </td>
-                          <td className="px-4 py-3 text-center font-mono text-gray-700 border-t border-gray-100">
-                            {point.threshold}
-                          </td>
-                          <td className={cn(
-                            'px-4 py-3 text-center font-mono font-semibold border-t border-gray-100',
-                            point.change > 0 ? 'text-tech-red' : point.change < 0 ? 'text-tech-green' : 'text-gray-500',
-                          )}>
-                            {point.change > 0 ? '+' : ''}{point.change}
-                          </td>
+                          {totalDays <= 1 ? (
+                            <>
+                              <td className={cn(
+                                'px-4 py-3 text-center font-mono font-bold border-t border-gray-100',
+                                point.status === 'danger' && 'text-tech-red',
+                                point.status === 'warning' && 'text-tech-orange',
+                                point.status === 'normal' && 'text-gray-700',
+                              )}>
+                                {point.currentValue}
+                              </td>
+                              <td className="px-4 py-3 text-center font-mono text-gray-700 border-t border-gray-100">
+                                {point.threshold}
+                              </td>
+                              <td className={cn(
+                                'px-4 py-3 text-center font-mono font-semibold border-t border-gray-100',
+                                point.change > 0 ? 'text-tech-red' : point.change < 0 ? 'text-tech-green' : 'text-gray-500',
+                              )}>
+                                {point.change > 0 ? '+' : ''}{point.change}
+                              </td>
+                            </>
+                          ) : (
+                            <>
+                              <td className="px-4 py-3 text-center font-mono text-gray-700 border-t border-gray-100">
+                                {point.avgValue}
+                              </td>
+                              <td className={cn(
+                                'px-4 py-3 text-center font-mono font-bold border-t border-gray-100',
+                                point.status === 'danger' && 'text-tech-red',
+                                point.status === 'warning' && 'text-tech-orange',
+                                point.status === 'normal' && 'text-gray-700',
+                              )}>
+                                {point.maxValue}
+                              </td>
+                              <td className="px-4 py-3 text-center font-mono text-gray-700 border-t border-gray-100">
+                                {point.threshold}
+                              </td>
+                            </>
+                          )}
                           <td className="px-4 py-3 text-center border-t border-gray-100">
                             {getStatusBadge(point.status)}
                           </td>
@@ -595,12 +789,75 @@ export default function ExportReport() {
               <motion.section
                 initial={{ opacity: 0, y: 20 }}
                 animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: 0.55 }}
+                className="mb-8"
+              >
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-1 h-4 bg-tech-blue rounded-full" />
+                      <h3 className="font-semibold text-gray-700">
+                        审批事件
+                        {totalDays > 1 && <span className="text-xs text-gray-400 ml-1 font-normal">（{totalDays}天）</span>}
+                      </h3>
+                      <span className="ml-auto text-xs text-tech-blue font-mono">{approvalEvents.length} 条</span>
+                    </div>
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {approvalEvents.length === 0 ? (
+                        <p className="text-xs text-gray-400 text-center py-4">期间无审批事件</p>
+                      ) : (
+                        approvalEvents.slice(0, 8).map((e) => (
+                          <div key={e.id} className="p-2 rounded bg-blue-50/50 text-xs">
+                            <div className="flex items-center justify-between mb-0.5">
+                              <span className="text-tech-blue font-medium">{e.displayFullDate}</span>
+                              <span className="text-gray-400">{e.operator || '-'}</span>
+                            </div>
+                            <p className="text-gray-600">{e.content}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                  <div className="border border-gray-200 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="w-1 h-4 bg-tech-orange rounded-full" />
+                      <h3 className="font-semibold text-gray-700">
+                        工单事件
+                        {totalDays > 1 && <span className="text-xs text-gray-400 ml-1 font-normal">（{totalDays}天）</span>}
+                      </h3>
+                      <span className="ml-auto text-xs text-tech-orange font-mono">{workOrderEvents.length} 条</span>
+                    </div>
+                    <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+                      {workOrderEvents.length === 0 ? (
+                        <p className="text-xs text-gray-400 text-center py-4">期间无工单事件</p>
+                      ) : (
+                        workOrderEvents.slice(0, 8).map((e) => (
+                          <div key={e.id} className="p-2 rounded bg-orange-50/50 text-xs">
+                            <div className="flex items-center justify-between mb-0.5">
+                              <span className="text-tech-orange font-medium">{e.displayFullDate}</span>
+                              <span className="text-gray-400">{e.operator || '-'}</span>
+                            </div>
+                            <p className="text-gray-600">{e.content}</p>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </motion.section>
+
+              <motion.section
+                initial={{ opacity: 0, y: 20 }}
+                animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.6 }}
                 className="mb-4"
               >
                 <div className="flex items-center gap-2 mb-4">
                   <div className="w-1 h-6 bg-tech-purple rounded-full" />
-                  <h2 className="text-xl font-bold text-gray-800">全事件统计</h2>
+                  <h2 className="text-xl font-bold text-gray-800">
+                    全事件统计
+                    {totalDays > 1 && <span className="text-sm text-gray-400 ml-2 font-normal">（{totalDays}天汇总）</span>}
+                  </h2>
                   <div className="flex-1 h-px bg-gray-200 ml-2" />
                   <span className="text-xs text-gray-400">共 {totalEvents} 条事件</span>
                 </div>
@@ -666,7 +923,9 @@ export default function ExportReport() {
                   <div className="border border-gray-200 rounded-lg p-4 bg-gradient-to-br from-gray-50 to-white">
                     <div className="flex items-center gap-2 mb-3">
                       <List className="w-4 h-4 text-tech-purple" />
-                      <span className="font-semibold text-gray-700">详细事件列表</span>
+                      <span className="font-semibold text-gray-700">
+                        详细事件列表
+                      </span>
                     </div>
                     <div className="space-y-2 max-h-80 overflow-y-auto pr-1">
                       {filteredEventLogs.length === 0 ? (
@@ -705,7 +964,7 @@ export default function ExportReport() {
                                   {log.level === 'info' ? '信息' : log.level === 'warning' ? '警告' : '危险'}
                                 </span>
                                 <span className="text-[10px] text-gray-400 font-mono ml-auto">
-                                  {log.displayDate}
+                                  {log.displayFullDate}
                                 </span>
                               </div>
                               <p className="text-xs text-gray-600 leading-relaxed break-words">

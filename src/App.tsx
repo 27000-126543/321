@@ -7,6 +7,7 @@ import Approval from '@/pages/Approval';
 import WorkOrder from '@/pages/WorkOrder';
 import Emergency from '@/pages/Emergency';
 import ExportReport from '@/pages/ExportReport';
+import EventCenter from '@/pages/EventCenter';
 import useStore from '@/store/useStore';
 
 const PrivateRoute = ({ children, allowedRoles }: { children: React.ReactNode; allowedRoles?: string[] }) => {
@@ -52,6 +53,7 @@ function App() {
             <Route path="/workorder" element={<PrivateRoute allowedRoles={['worker', 'manager', 'director']}><WorkOrder /></PrivateRoute>} />
             <Route path="/emergency" element={<PrivateRoute allowedRoles={['manager', 'director']}><Emergency /></PrivateRoute>} />
             <Route path="/export" element={<PrivateRoute allowedRoles={['manager', 'director']}><ExportReport /></PrivateRoute>} />
+            <Route path="/events" element={<PrivateRoute allowedRoles={['worker', 'manager', 'director']}><EventCenter /></PrivateRoute>} />
             <Route path="*" element={<Navigate to="/login" replace />} />
           </Routes>
         </BrowserRouter>

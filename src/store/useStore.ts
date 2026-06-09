@@ -12,6 +12,7 @@ import type {
   UserAccount,
   UserRole,
   EmergencyType,
+  EventHandleStatus,
 } from '@/types';
 import {
   mockShields,
@@ -50,7 +51,8 @@ interface AppState {
   updateShieldParams: () => void;
   updateMonitoring: () => void;
   updateWorkers: () => void;
-  addEventLog: (log: Omit<EventLog, 'id' | 'time'>) => void;
+  addEventLog: (log: Partial<Omit<EventLog, 'id' | 'time'>> & Pick<EventLog, 'type' | 'level' | 'content'>) => void;
+  updateEventStatus: (eventId: string, status: EventHandleStatus, handler: string, remark?: string) => void;
 
   startEmergency: (type: EmergencyType) => void;
   resolveEmergency: () => void;
@@ -142,7 +144,15 @@ const useStore = create<AppState>((set, get) => ({
     });
     newPoints.forEach((np) => {
       if (np.shouldTrigger) {
-        get().addEventLog({ type: '预警', level: 'danger', content: `监测点${np.point.code}沉降值${np.newValue}mm，超过阈值${np.point.threshold}mm`, operator: '系统' });
+        get().addEventLog({
+          type: '预警',
+          level: 'danger',
+          content: `监测点${np.point.code}沉降值${np.newValue}mm，超过阈值${np.point.threshold}mm`,
+          operator: '系统',
+          relatedType: 'monitoringPoint',
+          relatedId: np.point.id,
+          relatedName: np.point.code,
+        });
         get().shields.forEach((s) => get().adjustShieldParamsBySettlement(s.id));
       }
     });
@@ -169,7 +179,15 @@ const useStore = create<AppState>((set, get) => ({
     });
     newWorkers.forEach((nw) => {
       if (nw.shouldTrigger) {
-        get().addEventLog({ type: '预警', level: 'warning', content: `${nw.worker.jobType}${nw.worker.name}进入密闭舱室超过30分钟`, operator: '系统' });
+        get().addEventLog({
+          type: '预警',
+          level: 'warning',
+          content: `${nw.worker.jobType}${nw.worker.name}进入密闭舱室超过30分钟`,
+          operator: '系统',
+          relatedType: 'worker',
+          relatedId: nw.worker.id,
+          relatedName: nw.worker.name,
+        });
       }
     });
     set({
@@ -186,11 +204,41 @@ const useStore = create<AppState>((set, get) => ({
   },
 
   addEventLog: (log) => {
+    const defaultStatus: EventHandleStatus = log.type === '预警' ? 'pending' : 'closed';
     set({
       eventLogs: [
-        { id: `e${Date.now()}`, time: dayjs().format('HH:mm:ss'), ...log },
-        ...get().eventLogs.slice(0, 49),
+        {
+          id: `e${Date.now()}${Math.floor(Math.random() * 1000)}`,
+          time: dayjs().format('HH:mm:ss'),
+          handleStatus: log.handleStatus ?? defaultStatus,
+          handleRecords: log.handleRecords ?? [],
+          ...log,
+        },
+        ...get().eventLogs.slice(0, 99),
       ],
+    });
+  },
+
+  updateEventStatus: (eventId, status, handler, remark) => {
+    const event = get().eventLogs.find((e) => e.id === eventId);
+    if (!event) return;
+    const newRecord = {
+      id: `hr${Date.now()}`,
+      status,
+      handler,
+      time: dayjs().format('YYYY-MM-DD HH:mm:ss'),
+      remark,
+    };
+    set({
+      eventLogs: get().eventLogs.map((e) =>
+        e.id === eventId
+          ? {
+              ...e,
+              handleStatus: status,
+              handleRecords: [...(e.handleRecords || []), newRecord],
+            }
+          : e
+      ),
     });
   },
 
@@ -267,6 +315,9 @@ const useStore = create<AppState>((set, get) => ({
       level: 'warning',
       content: `${roleData.role}${roleData.user}驳回采购计划${plan.id.toUpperCase()}`,
       operator: get().currentUser?.username,
+      relatedType: 'purchasePlan',
+      relatedId: plan.id,
+      relatedName: plan.id.toUpperCase(),
     });
     set({
       purchasePlans: get().purchasePlans.map((p) =>
@@ -276,21 +327,39 @@ const useStore = create<AppState>((set, get) => ({
   },
 
   startMaintenance: (orderId, handler) => {
+    const order = get().maintenanceOrders.find((o) => o.id === orderId);
     set({
       maintenanceOrders: get().maintenanceOrders.map((o) =>
         o.id === orderId ? { ...o, status: 'inProgress', handler } : o,
       ),
     });
-    get().addEventLog({ type: '工单', level: 'info', content: `保养工单${orderId.toUpperCase()}开始处理`, operator: handler });
+    get().addEventLog({
+      type: '工单',
+      level: 'info',
+      content: `保养工单${orderId.toUpperCase()}开始处理`,
+      operator: handler,
+      relatedType: 'maintenanceOrder',
+      relatedId: orderId,
+      relatedName: order ? `${orderId.toUpperCase()}-${order.type}` : orderId.toUpperCase(),
+    });
   },
 
   completeMaintenance: (orderId, handler) => {
+    const order = get().maintenanceOrders.find((o) => o.id === orderId);
     set({
       maintenanceOrders: get().maintenanceOrders.map((o) =>
         o.id === orderId ? { ...o, status: 'completed', handler } : o,
       ),
     });
-    get().addEventLog({ type: '工单', level: 'info', content: `保养工单${orderId.toUpperCase()}已完成`, operator: handler });
+    get().addEventLog({
+      type: '工单',
+      level: 'info',
+      content: `保养工单${orderId.toUpperCase()}已完成`,
+      operator: handler,
+      relatedType: 'maintenanceOrder',
+      relatedId: orderId,
+      relatedName: order ? `${orderId.toUpperCase()}-${order.type}` : orderId.toUpperCase(),
+    });
   },
 
   setSelectedShield: (id) => set({ selectedShieldId: id }),
@@ -298,6 +367,7 @@ const useStore = create<AppState>((set, get) => ({
   setSelectedMonitoring: (id) => set({ selectedMonitoringId: id }),
 
   adjustShieldParamsBySettlement: (shieldId) => {
+    const shield = get().shields.find((s) => s.id === shieldId);
     set({
       shields: get().shields.map((s) => {
         if (s.id !== shieldId) return s;
@@ -309,7 +379,15 @@ const useStore = create<AppState>((set, get) => ({
         };
       }),
     });
-    get().addEventLog({ type: '预警', level: 'warning', content: `已自动调整盾构机注浆压力+0.2bar，推进速度-10mm/min`, operator: '系统' });
+    get().addEventLog({
+      type: '预警',
+      level: 'warning',
+      content: `已自动调整盾构机注浆压力+0.2bar，推进速度-10mm/min`,
+      operator: '系统',
+      relatedType: 'shield',
+      relatedId: shieldId,
+      relatedName: shield?.name,
+    });
   },
 
   generatePurchasePlanIfNeeded: () => {
@@ -317,8 +395,9 @@ const useStore = create<AppState>((set, get) => ({
     criticalSegments.forEach((seg) => {
       const exists = get().purchasePlans.some((p) => p.segmentId === seg.id && p.status !== 'rejected' && p.status !== 'approved');
       if (!exists) {
+        const planId = `pp${Date.now()}`;
         const newPlan: PurchasePlan = {
-          id: `pp${Date.now()}`,
+          id: planId,
           segmentId: seg.id,
           spec: seg.spec,
           quantity: seg.safeStock * 2,
@@ -331,7 +410,15 @@ const useStore = create<AppState>((set, get) => ({
           ],
         };
         set({ purchasePlans: [newPlan, ...get().purchasePlans] });
-        get().addEventLog({ type: '审批', level: 'warning', content: `管片${seg.spec}库存不足，自动生成采购计划`, operator: '系统' });
+        get().addEventLog({
+          type: '审批',
+          level: 'warning',
+          content: `管片${seg.spec}库存不足，自动生成采购计划`,
+          operator: '系统',
+          relatedType: 'purchasePlan',
+          relatedId: planId,
+          relatedName: planId.toUpperCase(),
+        });
       }
     });
   },
@@ -346,8 +433,9 @@ const useStore = create<AppState>((set, get) => ({
             (o) => o.shieldId === s.id && o.type === thresholds[i],
           );
           if (!exists) {
+            const orderId = `mo${Date.now()}${i}`;
             const newOrder: MaintenanceOrder = {
-              id: `mo${Date.now()}${i}`,
+              id: orderId,
               shieldId: s.id,
               shieldName: s.name,
               type: thresholds[i],
@@ -357,7 +445,15 @@ const useStore = create<AppState>((set, get) => ({
               items: ['更换主轴承密封件', '检查液压系统', '刀盘刀具检测', '电气系统检查'],
             };
             set({ maintenanceOrders: [newOrder, ...get().maintenanceOrders] });
-            get().addEventLog({ type: '工单', level: 'warning', content: `${s.name}累计掘进${s.totalRings}环，触发${thresholds[i]}`, operator: '系统' });
+            get().addEventLog({
+              type: '工单',
+              level: 'warning',
+              content: `${s.name}累计掘进${s.totalRings}环，触发${thresholds[i]}`,
+              operator: '系统',
+              relatedType: 'maintenanceOrder',
+              relatedId: orderId,
+              relatedName: `${orderId.toUpperCase()}-${thresholds[i]}`,
+            });
           }
         }
       });
@@ -369,7 +465,15 @@ const useStore = create<AppState>((set, get) => ({
       if (w.area === '密闭舱室' && w.enterTime) {
         const minutes = dayjs().diff(dayjs(w.enterTime), 'minute');
         if (minutes > 30 && w.status !== 'overtime') {
-          get().addEventLog({ type: '预警', level: 'danger', content: `${w.jobType}${w.name}密闭舱室超时${minutes}分钟，请立即救援`, operator: '系统' });
+          get().addEventLog({
+            type: '预警',
+            level: 'danger',
+            content: `${w.jobType}${w.name}密闭舱室超时${minutes}分钟，请立即救援`,
+            operator: '系统',
+            relatedType: 'worker',
+            relatedId: w.id,
+            relatedName: w.name,
+          });
           set({
             workers: get().workers.map((x) => (x.id === w.id ? { ...x, status: 'overtime' } : x)),
           });
@@ -388,7 +492,12 @@ const useStore = create<AppState>((set, get) => ({
               n.id === node.id ? { ...n, status: 'delayed', suggestion: '建议增加作业班组，两班倒赶工，预计可缩短30%工期' } : n,
             ),
           });
-          get().addEventLog({ type: '进度', level: 'warning', content: `关键节点【${node.name}】进度延期，已推送调整建议`, operator: '系统' });
+          get().addEventLog({
+            type: '进度',
+            level: 'warning',
+            content: `关键节点【${node.name}】进度延期，已推送调整建议`,
+            operator: '系统',
+          });
         }
       }
     });

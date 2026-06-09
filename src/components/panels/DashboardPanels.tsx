@@ -12,11 +12,12 @@ import {
   Wrench,
   Siren,
   FileDown,
+  AlertCircle,
 } from 'lucide-react';
 import dayjs from 'dayjs';
 import useStore from '@/store/useStore';
 import { cn } from '@/lib/utils';
-import type { MonitoringPoint, StationNode, EventType, EventLevel } from '@/types';
+import type { MonitoringPoint, StationNode, EventType, EventLevel, EventHandleStatus } from '@/types';
 
 const HudCorners: React.FC<{ className?: string }> = ({ className = '' }) => (
   <>
@@ -153,6 +154,7 @@ export const LeftNavPanel: React.FC = () => {
 
   const menuItems: MenuItem[] = [
     { key: 'dashboard', label: '主控台', path: '/dashboard', icon: <Gauge className="w-5 h-5" /> },
+    { key: 'events', label: '事件中心', path: '/events', icon: <AlertCircle className="w-5 h-5" /> },
     { key: 'approval', label: '管片审批', path: '/approval', icon: <FileCheck className="w-5 h-5" /> },
     { key: 'workorder', label: '设备工单', path: '/workorder', icon: <Wrench className="w-5 h-5" /> },
     { key: 'emergency', label: '应急指挥', path: '/emergency', icon: <Siren className="w-5 h-5" /> },
@@ -335,10 +337,17 @@ const eventTypeColors: Record<EventType, string> = {
   进度: 'bg-tech-green/20 text-tech-green border-tech-green/40',
 };
 
+const handleStatusBadge: Record<EventHandleStatus, { label: string; cls: string; dot: string }> = {
+  pending: { label: '待处理', cls: 'bg-tech-red/10 text-tech-red border-tech-red/40', dot: 'bg-tech-red animate-pulse' },
+  inProgress: { label: '处理中', cls: 'bg-tech-orange/10 text-tech-orange border-tech-orange/40', dot: 'bg-tech-orange animate-pulse' },
+  closed: { label: '已关闭', cls: 'bg-tech-green/10 text-tech-green border-tech-green/40', dot: 'bg-tech-green' },
+};
+
 export const RightEventPanel: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'warning' | 'event'>('warning');
   const monitoringPoints = useStore((s) => s.monitoringPoints);
   const eventLogs = useStore((s) => s.eventLogs);
+  const navigate = useNavigate();
 
   const warnings = monitoringPoints.filter((m) => m.status === 'danger' || m.status === 'warning');
   const sortedEvents = [...eventLogs].sort((a, b) => b.time.localeCompare(a.time));
@@ -380,13 +389,22 @@ export const RightEventPanel: React.FC = () => {
           <button
             onClick={() => setActiveTab('event')}
             className={cn(
-              'flex-1 py-3 text-sm font-medium transition-all duration-300 relative',
+              'flex-1 py-3 text-sm font-medium transition-all duration-300 relative group',
               activeTab === 'event' ? 'text-tech-blue' : 'text-gray-400 hover:text-white',
             )}
           >
             <div className="flex items-center justify-center gap-2">
               <Activity className="w-4 h-4" />
               <span>事件</span>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  navigate('/events');
+                }}
+                className="opacity-0 group-hover:opacity-100 transition-opacity text-[10px] px-1.5 py-0.5 rounded bg-tech-blue/20 text-tech-cyan border border-tech-blue/40 hover:bg-tech-blue/30"
+              >
+                全部
+              </button>
             </div>
             {activeTab === 'event' && <div className="absolute bottom-0 left-1/2 -translate-x-1/2 w-10 h-0.5 bg-tech-blue rounded-full shadow-[0_0_10px_#1890FF]" />}
           </button>
@@ -461,15 +479,25 @@ export const RightEventPanel: React.FC = () => {
                   <p className="text-sm">暂无事件日志</p>
                 </div>
               ) : (
-                sortedEvents.map((log, index) => (
+                sortedEvents.map((log, index) => {
+                  const hStatus = log.handleStatus || 'closed';
+                  const hCfg = handleStatusBadge[hStatus];
+                  return (
                   <motion.div
                     key={log.id}
                     initial={{ opacity: 0, y: 10 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.3, delay: index * 0.03 }}
-                    className="p-3 rounded-lg bg-white/5 border border-tech-border/30 hover:bg-white/10 transition-all duration-300"
+                    onClick={() => navigate('/events')}
+                    className="p-3 rounded-lg bg-white/5 border border-tech-border/30 hover:bg-white/10 hover:border-tech-blue/40 transition-all duration-300 cursor-pointer relative"
                   >
-                    <div className="flex items-start gap-2">
+                    {log.handleStatus && log.handleStatus !== 'closed' && (
+                      <span className={cn('absolute top-2 right-2 inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-medium border', hCfg.cls)}>
+                        <span className={cn('w-1 h-1 rounded-full', hCfg.dot)} />
+                        {hCfg.label}
+                      </span>
+                    )}
+                    <div className="flex items-start gap-2 pr-12">
                       <div className="mt-1.5 flex-shrink-0">
                         <span className={cn('w-2 h-2 rounded-full inline-block shadow-[0_0_6px_currentColor]', {
                           'bg-tech-red text-tech-red': log.level === 'danger',
@@ -491,7 +519,8 @@ export const RightEventPanel: React.FC = () => {
                       </div>
                     </div>
                   </motion.div>
-                ))
+                  );
+                })
               )}
             </div>
           )}
